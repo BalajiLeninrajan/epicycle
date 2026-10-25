@@ -61,18 +61,28 @@ export function zhangSuen(bin: BinaryImage): BinaryImage {
       }
     }
   }
-  const list = new Int32Array(count)
-  count = 0
-  for (let i = 0; i < img.length; i++) if (img[i]) list[count++] = i
-  const marked = new Int32Array(count)
+  // Only pixels touching the background can ever be marked (an interior pixel has B = 8),
+  // so each pass scans this border list instead of every foreground pixel. It is kept
+  // sorted, so marks come out in the same raster order as a full scan would give.
+  let border = new Int32Array(Math.max(16, count))
+  let nb = 0
+  const inBorder = new Uint8Array(img.length)
+  for (let i = 0; i < img.length; i++) {
+    if (img[i] && neighbors(img, i, W) < 8) {
+      border[nb++] = i
+      inBorder[i] = 1
+    }
+  }
+  const marked = new Int32Array(Math.max(1, count))
+  const offsets = [-W - 1, -W, -W + 1, -1, 1, W - 1, W, W + 1]
 
   let changed = true
   while (changed) {
     changed = false
     for (let pass = 0; pass < 2; pass++) {
       let nm = 0
-      for (let k = 0; k < count; k++) {
-        const i = list[k]
+      for (let k = 0; k < nb; k++) {
+        const i = border[k]
         const b = neighbors(img, i, W)
         // Lu-Wang lower bound of 3 (not 2): B = 2 pixels are tips of 2px-thick
         // diagonals, and deleting them eats those lines away one pixel per pass.
@@ -88,19 +98,43 @@ export function zhangSuen(bin: BinaryImage): BinaryImage {
       // and can break 2px-thick strokes. Re-checking each mark against the current
       // image keeps every deletion topology preserving.
       let deleted = 0
+      let added = 0
       for (let k = 0; k < nm; k++) {
         const i = marked[k]
         if (neighbors(img, i, W) >= 2 && transitions(img, i, W) === 1) {
           img[i] = 0
           deleted++
+          // Its foreground neighbors now touch the background.
+          for (const o of offsets) {
+            const j = i + o
+            if (img[j] && !inBorder[j]) {
+              inBorder[j] = 1
+              marked[nm + added++] = j
+            }
+          }
         }
       }
       if (deleted > 0) {
         changed = true
-        count = compact(img, list, count)
+        let m = 0
+        for (let k = 0; k < nb; k++) if (img[border[k]]) border[m++] = border[k]
+        if (m + added > border.length) {
+          const grown = new Int32Array(Math.max(border.length * 2, m + added))
+          grown.set(border.subarray(0, m))
+          border = grown
+        }
+        border.set(marked.subarray(nm, nm + added), m)
+        nb = m + added
+        if (added > 0) border.subarray(0, nb).sort()
       }
     }
   }
+
+  count = 0
+  for (let i = 0; i < img.length; i++) count += img[i]
+  const list = new Int32Array(count)
+  count = 0
+  for (let i = 0; i < img.length; i++) if (img[i]) list[count++] = i
 
   // Zhang-Suen leaves 4-connected staircase corners. Remove the ones that are
   // simple so the skeleton is 8-connected and 1px wide.
