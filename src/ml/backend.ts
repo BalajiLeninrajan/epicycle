@@ -5,25 +5,18 @@ import { fetchCached } from './fetch'
 
 export type Backend = 'webgpu' | 'wasm'
 
-interface GpuAdapterLike {
-  features: { has(name: string): boolean }
-}
 interface GpuLike {
-  requestAdapter(options?: { powerPreference?: 'high-performance' | 'low-power' }): Promise<GpuAdapterLike | null>
+  requestAdapter(): Promise<object | null>
 }
 
 let backend: Promise<Backend> | null = null
-let shaderF16 = false
 
 async function probe(): Promise<Backend> {
   try {
     const gpu = (globalThis.navigator as { gpu?: GpuLike } | undefined)?.gpu
-    const adapter = await gpu?.requestAdapter({ powerPreference: 'high-performance' })
-    if (!adapter) return 'wasm'
-    shaderF16 = adapter.features.has('shader-f16')
-    // Hand ORT the adapter we probed so its device has the features we checked.
-    ;(ort.env.webgpu as { adapter?: unknown }).adapter = adapter
-    return 'webgpu'
+    // Same default adapter query ORT's WebGPU EP makes. Every model runs fp32 on WebGPU,
+    // so no optional features need checking.
+    return (await gpu?.requestAdapter()) ? 'webgpu' : 'wasm'
   } catch {
     return 'wasm'
   }
@@ -32,11 +25,6 @@ async function probe(): Promise<Backend> {
 /** 'webgpu' when navigator.gpu gives an adapter, else 'wasm'. Cached after the first call. */
 export function detectBackend(): Promise<Backend> {
   return (backend ??= probe())
-}
-
-/** Whether the WebGPU adapter can run fp16 shaders. False on wasm. */
-export async function webgpuHasF16(): Promise<boolean> {
-  return (await detectBackend()) === 'webgpu' && shaderF16
 }
 
 // Runtime files. The asyncify build is the one the webgpu entry loads; it carries both the

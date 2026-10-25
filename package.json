@@ -30,6 +30,9 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "workerd"
-    ]
+    ],
+    "patchedDependencies": {
+      "@huggingface/transformers@4.3.1": "patches/@huggingface__transformers@4.3.1.patch"
+    }
   }
 }

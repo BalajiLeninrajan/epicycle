@@ -4,13 +4,18 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@huggingface/transformers@4.3.1':
+    hash: b0da9b0678d8dcc25e198abb66b7c73678075994f6eb1f0f1dece8772d1f1e69
+    path: patches/@huggingface__transformers@4.3.1.patch
+
 importers:
 
   .:
     dependencies:
       '@huggingface/transformers':
         specifier: 4.3.1
-        version: 4.3.1(@types/node@26.6.5)
+        version: 4.3.1(patch_hash=b0da9b0678d8dcc25e198abb66b7c73678075994f6eb1f0f1dece8772d1f1e69)(@types/node@26.6.5)
       '@preact/signals':
         specifier: ^2.11.3
         version: 2.11.3(preact@11.0.2)
@@ -1708,7 +1713,7 @@ snapshots:
 
   '@huggingface/tokenizers@0.2.0': {}
 
-  '@huggingface/transformers@4.3.1(@types/node@26.6.5)':
+  '@huggingface/transformers@4.3.1(patch_hash=b0da9b0678d8dcc25e198abb66b7c73678075994f6eb1f0f1dece8772d1f1e69)(@types/node@26.6.5)':
     dependencies:
       '@huggingface/jinja': 0.5.10
       '@huggingface/tokenizers': 0.2.0

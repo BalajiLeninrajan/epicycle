@@ -48,15 +48,16 @@ const load = sharedLoader(async (onProgress): Promise<Backend> => {
   const progress = createProgress(onProgress, { runtime: ORT_RUNTIME_BYTES })
   try {
     let backend = await detectBackend()
-    const runtime = ensureRuntime((l, t) => progress.file('runtime', l, t)).then(() =>
-      progress.file('runtime', ORT_RUNTIME_BYTES, ORT_RUNTIME_BYTES),
-    )
     const proc = AutoProcessor.from_pretrained(MODEL_ID, {
       progress_callback: (info: ProgressInfo) => progress.transformers(info, MODEL_ID),
     })
     proc.catch(() => {}) // awaited below; don't report it as unhandled if the model fails first
+    // The runtime comes first and on its own: a runtime failure is not a WebGPU failure, and
+    // falling back while the WebGPU load kept running would leave two models racing.
+    await ensureRuntime((l, t) => progress.file('runtime', l, t))
+    progress.file('runtime', ORT_RUNTIME_BYTES, ORT_RUNTIME_BYTES)
     try {
-      await Promise.all([runtime, loadOn(backend, progress)])
+      await loadOn(backend, progress)
     } catch (err) {
       if (backend !== 'webgpu') throw err
       console.warn('SAM: WebGPU load failed, falling back to wasm', err)
