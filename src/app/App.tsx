@@ -27,7 +27,7 @@ export function App() {
           <span class="mark" aria-hidden="true">
             <EpicycleIcon class="cn-icon" />
           </span>
-          Fourier<em>&nbsp;drawing</em>
+          epi<em>cycle</em>
         </span>
         <TopActions />
       </header>

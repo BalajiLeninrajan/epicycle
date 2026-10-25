@@ -440,7 +440,7 @@ export async function exportAs(kind: ExportKind): Promise<void> {
       if (recordCancelled) return
       ext = 'webm'
     }
-    download(blob, `${sourceName.peek()}-fourier.${ext}`)
+    download(blob, `${sourceName.peek()}-epicycle.${ext}`)
   } catch (err) {
     error.value = `Export failed: ${errorMessage(err)}`
   } finally {
