@@ -33,6 +33,13 @@ export interface PipelineDeps {
   samPredict(points: SamPoint[]): Promise<GrayImage>
   segmenterReady(): boolean
   lineArtReady(): boolean
+  /** Load SAM before the first click is predicted. Defaults to a no-op. */
+  loadSam?(): Promise<void>
+  /**
+   * A ready model failed at inference. The run carries on without it (no mask, or Canny
+   * lines), so the owner should mark the model unusable so the next run doesn't retry it.
+   */
+  onInferenceError?(model: 'segment' | 'lineart', err: unknown): void
   /** Clock for timings. Defaults to performance.now. */
   now?(): number
 }
@@ -144,7 +151,13 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
       key = `sam${s.samVersion}`
       isSam = true
     } else if (s.samPoints.length === 0) {
-      if (!s.autoProbValue && deps.segmenterReady()) await ensureAutoProb(s, timings)
+      if (!s.autoProbValue && deps.segmenterReady()) {
+        try {
+          await ensureAutoProb(s, timings)
+        } catch (err) {
+          deps.onInferenceError?.('segment', err)
+        }
+      }
       if (s.autoProbValue) {
         prob = s.autoProbValue
         key = 'auto'
@@ -212,14 +225,22 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
       return finish(s, n, [], `stipple|${dotsKey}`, () => tourPoints(dots), 'stipple', masked, timings, t0)
     }
 
-    const style: LineStyle = settings.lineStyle === 'ai' && deps.lineArtReady() ? 'ai' : 'canny'
+    let prob: GrayImage | null = null
+    if (settings.lineStyle === 'ai' && deps.lineArtReady()) {
+      try {
+        prob = await ensureLineProb(s, timings)
+      } catch (err) {
+        deps.onInferenceError?.('lineart', err)
+      }
+    }
+    const style: LineStyle = prob ? 'ai' : 'canny'
     let source: BinaryImage
     let sourceKey: string
-    if (style === 'ai') {
-      const prob = await ensureLineProb(s, timings)
+    if (prob) {
+      const p = prob
       // An await happened: the image may have changed, but s still refers to the one this run started with.
       sourceKey = `ai|${params.lineThreshold}`
-      source = memo(s, 'lineThreshold', sourceKey, timings, () => threshold(prob, params.lineThreshold))
+      source = memo(s, 'lineThreshold', sourceKey, timings, () => threshold(p, params.lineThreshold))
     } else {
       sourceKey = `canny|${params.cannySigma}|${params.cannyLow}|${params.cannyHigh}`
       source = memo(s, 'canny', sourceKey, timings, () =>
@@ -289,13 +310,18 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
     async setSamPoints(points) {
       const s = st
       if (!s) return []
+      // Take the ticket before any await, so requests resolve in the order they were sent
+      // even when the first click has to wait for SAM to download.
       const seq = ++s.samSeq
+      const current = () => seq === s.samSeq && st === s
       const pts = points.map((p) => ({ x: p.x, y: p.y, positive: p.positive }))
       if (pts.length === 0) {
         s.samPoints = []
         s.samProb = null
         s.samVersion++
       } else {
+        await deps.loadSam?.()
+        if (!current()) return st === s ? outlineOf(s, await subjectMask(s, {}), {}) : []
         if (!s.samEmbed) {
           s.samEmbed = deps.samSetImage(s.image).catch((err) => {
             s.samEmbed = null
@@ -304,12 +330,11 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
         }
         await s.samEmbed
         const prob = await deps.samPredict(pts)
-        // A newer click list superseded this one while we waited.
-        if (seq === s.samSeq) {
-          s.samPoints = pts
-          s.samProb = prob
-          s.samVersion++
-        }
+        // A newer click list or a new image superseded this one while we waited.
+        if (!current()) return st === s ? outlineOf(s, await subjectMask(s, {}), {}) : []
+        s.samPoints = pts
+        s.samProb = prob
+        s.samVersion++
       }
       return outlineOf(s, await subjectMask(s, {}), {})
     },

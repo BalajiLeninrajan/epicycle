@@ -20,5 +20,6 @@ export default defineConfig({
   // lightningcss rejects catppuccin-neu's ::picker(select):popover-open selector.
   build: { cssMinify: 'esbuild' },
   optimizeDeps: { exclude: ['onnxruntime-web', '@huggingface/transformers'] },
-  test: { environment: 'node', include: ['src/**/*.test.ts'] },
+  // Two workers keep test runs light on low-memory machines.
+  test: { environment: 'node', include: ['src/**/*.test.ts'], maxWorkers: 2 },
 })

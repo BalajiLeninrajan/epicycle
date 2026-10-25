@@ -300,12 +300,63 @@ describe('createPipeline', () => {
     const p = createPipeline(deps)
     p.setImage(ringAndCross())
     const first = p.setSamPoints([{ x: 0.5, y: 0.5, positive: true }])
+    // Let the first request reach samPredict before the second is sent.
+    await new Promise((r) => setTimeout(r, 0))
     const second = await p.setSamPoints([{ x: 0.5, y: 0.5, positive: true }])
     release()
     await first
     const outline = await p.getMaskOutline()
     expect(outline).toEqual(second)
     expect(Math.hypot(outline[0][0] - CX, outline[0][1] - CY)).toBeGreaterThan(55)
+  })
+
+  it('orders SAM requests by when they were sent, even while SAM is loading', async () => {
+    let release: () => void = () => {}
+    const loaded = new Promise<void>((r) => (release = r))
+    const deps = fakeDeps({ samProb: diskProb(W, H, CX, CY, 40) })
+    deps.loadSam = () => loaded
+    const p = createPipeline(deps)
+    p.setImage(ringAndCross())
+    // Click while SAM downloads, then reset before the download finishes.
+    const click = p.setSamPoints([{ x: 0.5, y: 0.5, positive: true }])
+    expect(await p.setSamPoints([])).toEqual([])
+    release()
+    await click
+    expect(await p.getMaskOutline()).toEqual([])
+    expect(deps.calls.samPredict).toBe(0)
+  })
+
+  it('drops a SAM request whose image was replaced during the load', async () => {
+    let release: () => void = () => {}
+    const loaded = new Promise<void>((r) => (release = r))
+    const deps = fakeDeps({ samProb: diskProb(W, H, CX, CY, 40) })
+    deps.loadSam = () => loaded
+    const p = createPipeline(deps)
+    p.setImage(ringAndCross())
+    const click = p.setSamPoints([{ x: 0.5, y: 0.5, positive: true }])
+    p.setImage(ringAndCross())
+    release()
+    expect(await click).toEqual([])
+    expect(await p.getMaskOutline()).toEqual([])
+  })
+
+  it('carries on without a mask or AI lines when inference fails', async () => {
+    const errors: string[] = []
+    const deps = fakeDeps({ segmentProb: diskProb(W, H, CX, CY, 40), lineProb: () => diskProb(W, H, CX, CY, 10) })
+    deps.segment = async () => {
+      throw new Error('device lost')
+    }
+    deps.lineArt = async () => {
+      throw new Error('device lost')
+    }
+    deps.onInferenceError = (id) => errors.push(id)
+    const p = createPipeline(deps)
+    p.setImage(ringAndCross())
+    const r = await p.run(settings({ lineStyle: 'ai', keepBackground: false }))
+    expect(r.masked).toBe(false)
+    expect(r.usedLineStyle).toBe('canny')
+    expect(r.strokes.length).toBeGreaterThan(0)
+    expect(errors.sort()).toEqual(['lineart', 'segment'])
   })
 
   it('returns a valid empty result for a blank image', async () => {

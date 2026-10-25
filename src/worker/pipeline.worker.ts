@@ -37,6 +37,11 @@ const pipeline = createPipeline({
   samPredict,
   segmenterReady: () => states.segment.status === 'ready',
   lineArtReady: () => states.lineart.status === 'ready',
+  loadSam: () => loadModel('sam'),
+  onInferenceError(id, err) {
+    // Keep the loaded session out of later runs; a reload goes through loadModel's retry.
+    report(id, { status: 'error', message: err instanceof Error ? err.message : String(err) })
+  },
 })
 
 function loadModel(id: ModelId): Promise<void> {
@@ -93,10 +98,7 @@ const api: PipelineApi = {
 
   loadModel,
 
-  async setSamPoints(points) {
-    if (points.length > 0) await loadModel('sam')
-    return pipeline.setSamPoints(points)
-  },
+  setSamPoints: (points) => pipeline.setSamPoints(points),
 
   getMaskOutline: () => pipeline.getMaskOutline(),
 
