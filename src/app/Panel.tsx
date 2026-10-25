@@ -1,5 +1,4 @@
-import { useSignal } from '@preact/signals'
-import type { ComponentChildren } from 'preact'
+import { computed, useSignal } from '@preact/signals'
 import { deriveParams } from '../pipeline/params'
 import type { LineStyle, ModelId, ModelState, PipelineSettings } from '../pipeline/types'
 import { Section, Segmented, Select, Slider, Toggle } from './controls'
@@ -36,7 +35,7 @@ import {
   time,
 } from './state'
 
-const STYLE_NAMES: Record<LineStyle, string> = { ai: 'AI lines', canny: 'Edges', stipple: 'Stipple' }
+const STYLE_NAMES: Record<LineStyle, string> = { ai: 'Lines', canny: 'Edges', stipple: 'Dots' }
 
 export function Panel() {
   const open = useSignal(true)
@@ -61,12 +60,12 @@ export function Panel() {
         <RecordingBar />
         {/* A disabled fieldset disables every control inside it while recording. */}
         <fieldset class="fd-fieldset cn-divide" disabled={recording.value}>
-          {isImage && <ModelStatus />}
-          {isImage && <SubjectSection />}
-          {isImage && <LinesSection />}
+          {isImage && !modelsReady.value && <ModelStatus />}
+          {isImage && <PictureSection />}
           <AnimationSection />
           <ExportSection />
-          <Advanced isImage={isImage} />
+          <FineTuning isImage={isImage} />
+          {isImage && modelsReady.value && <ModelStatus />}
         </fieldset>
       </div>
     </aside>
@@ -132,12 +131,17 @@ const MODEL_NAMES: Record<ModelId, string> = {
   sam: 'Mask editing model',
 }
 
+const shownModels = computed(() => {
+  const m = models.value
+  return (['lineart', 'segment', 'sam'] as ModelId[]).filter((id) => id !== 'sam' || m.sam.status !== 'idle')
+})
+const modelsReady = computed(() => shownModels.value.every((id) => models.value[id].status === 'ready'))
+
+/** Download progress at the top while models load; one quiet line at the bottom once they're ready. */
 function ModelStatus() {
   const m = models.value
-  const ids: ModelId[] = ['lineart', 'segment', 'sam']
-  const shown = ids.filter((id) => id !== 'sam' || m.sam.status !== 'idle')
-  // Once everything is ready the section collapses to one quiet line.
-  if (shown.every((id) => m[id].status === 'ready')) {
+  const shown = shownModels.value
+  if (modelsReady.value) {
     const gpu = shown.some((id) => {
       const s = m[id]
       return s.status === 'ready' && s.backend === 'webgpu'
@@ -207,13 +211,14 @@ function ModelRow(props: { id: ModelId; state: ModelState }) {
   )
 }
 
-// ── Subject ───────────────────────────────────────────────────────────────
+// ── Picture ───────────────────────────────────────────────────────────────
 
-function SubjectSection() {
+function PictureSection() {
   const keep = settings.keepBackground.value
   const editing = maskEditing.value
+  const dots = settings.lineStyle.value === 'stipple'
   return (
-    <Section title="Subject">
+    <Section title="Picture">
       <Segmented
         label="Draw"
         options={[
@@ -238,7 +243,57 @@ function SubjectSection() {
           )}
         </div>
       )}
+      <LineStyleControl />
+      {dots ? <StippleCount /> : <DetailSlider />}
+      <UsedStyleNote />
+      {!dots && (
+        <div class="cn-row cn-between cn-gap-12">
+          <Toggle
+            label="Outline"
+            checked={settings.includeSilhouette.value}
+            disabled={keep}
+            onChange={(v) => (settings.includeSilhouette.value = v)}
+          />
+          <PeekStrokes />
+        </div>
+      )}
     </Section>
+  )
+}
+
+/** Shows the extracted strokes over the stage while held, by pointer or by Space/Enter. */
+function PeekStrokes() {
+  const on = () => (showStrokes.value = true)
+  const off = () => (showStrokes.value = false)
+  return (
+    <button
+      type="button"
+      class="btn btn-ghost is-sm cn-nowrap"
+      aria-pressed={showStrokes.value}
+      // The stroke overlay matches the resting view, not the follow camera.
+      disabled={!hasDrawing.value || render.followTip.value}
+      onPointerDown={(e) => {
+        // Capture so the release lands here even if the pointer slides off.
+        e.currentTarget.setPointerCapture(e.pointerId)
+        on()
+      }}
+      onPointerUp={off}
+      onPointerCancel={off}
+      onLostPointerCapture={off}
+      onKeyDown={(e) => {
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault()
+          on()
+        }
+      }}
+      onKeyUp={(e) => {
+        if (e.key === ' ' || e.key === 'Enter') off()
+      }}
+      onBlur={off}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      Hold to see strokes
+    </button>
   )
 }
 
@@ -291,17 +346,6 @@ function MaskEditor() {
   )
 }
 
-// ── Lines ─────────────────────────────────────────────────────────────────
-
-function LinesSection() {
-  return (
-    <Section title="Lines">
-      <DetailSlider />
-      <UsedStyleNote />
-    </Section>
-  )
-}
-
 function DetailSlider() {
   const d = settings.detail.value
   return (
@@ -344,9 +388,46 @@ function AnimationSection() {
     <Section title="Animation">
       <CirclesSlider />
       <DurationSlider />
+      <Segmented<'full' | 'fade'>
+        label="Trail"
+        options={[
+          { value: 'fade', label: 'Fading' },
+          { value: 'full', label: 'Full' },
+        ]}
+        value={render.trailMode.value}
+        onChange={(v) => (render.trailMode.value = v)}
+      />
+      <ShowChips />
       <Toggle label="Follow the tip" checked={render.followTip.value} onChange={(v) => (render.followTip.value = v)} />
       {render.followTip.value && <ZoomSlider />}
+      <LineWidthSlider />
     </Section>
+  )
+}
+
+function ShowChips() {
+  const chips = [
+    { label: 'Circles', sig: render.showCircles },
+    { label: 'Arrows', sig: render.showArrows },
+    { label: 'Formula', sig: showFormula },
+  ]
+  return (
+    <div class="cn-stack cn-gap-8" role="group" aria-label="Show">
+      <span class="cn-label">Show</span>
+      <div class="cn-cluster">
+        {chips.map(({ label, sig }) => (
+          <button
+            key={label}
+            type="button"
+            class="btn btn-ghost is-sm"
+            aria-pressed={sig.value}
+            onClick={() => (sig.value = !sig.value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -416,52 +497,26 @@ function ExportSection() {
   )
 }
 
-// ── Advanced ──────────────────────────────────────────────────────────────
+// ── Fine-tuning ───────────────────────────────────────────────────────────
 
-function Advanced(props: { isImage: boolean }) {
+/** The numeric knobs; everything that changes the look stays in the sections above. */
+function FineTuning(props: { isImage: boolean }) {
   const open = useSignal(false)
   return (
     <div class="cn-p-16">
       <div class="accordion" data-open={open.value || undefined}>
         <label>
           <input type="checkbox" checked={open.value} onChange={(e) => (open.value = e.currentTarget.checked)} />
-          <b>Advanced</b>
+          <b>Fine-tuning</b>
         </label>
         <div class="fold">
-          <div class="cn-stack cn-gap-24">
-            {props.isImage && <AdvancedLines />}
-            <AdvancedPath />
-            <AdvancedAnimation />
+          <div class="cn-stack cn-gap-16">
+            {props.isImage && <Overrides />}
+            <SampleCount />
           </div>
         </div>
       </div>
     </div>
-  )
-}
-
-function Group(props: { title: string; children: ComponentChildren }) {
-  return (
-    <div class="cn-stack cn-gap-16" role="group" aria-label={props.title}>
-      <span class="cn-microlabel">{props.title}</span>
-      {props.children}
-    </div>
-  )
-}
-
-function AdvancedLines() {
-  return (
-    <Group title="Lines">
-      <LineStyleControl />
-      <StippleCount />
-      <Toggle
-        label="Add the subject outline"
-        checked={settings.includeSilhouette.value}
-        disabled={settings.keepBackground.value}
-        onChange={(v) => (settings.includeSilhouette.value = v)}
-      />
-      <Overrides />
-      <Toggle label="Show strokes" checked={showStrokes.value} onChange={(v) => (showStrokes.value = v)} />
-    </Group>
   )
 }
 
@@ -549,42 +604,18 @@ function OverrideSlider(props: (typeof OVERRIDES)[number]) {
   )
 }
 
-function AdvancedPath() {
+function SampleCount() {
   return (
-    <Group title="Path">
-      <Select<PipelineSettings['sampleCount']>
-        label="Samples"
-        options={[
-          { value: 2048, label: '2048 points' },
-          { value: 4096, label: '4096 points' },
-          { value: 8192, label: '8192 points' },
-        ]}
-        value={settings.sampleCount.value}
-        onChange={(v) => (settings.sampleCount.value = v)}
-      />
-    </Group>
-  )
-}
-
-function AdvancedAnimation() {
-  return (
-    <Group title="Animation">
-      <Toggle label="Show circles" checked={render.showCircles.value} onChange={(v) => (render.showCircles.value = v)} />
-      <Toggle label="Show arrows" checked={render.showArrows.value} onChange={(v) => (render.showArrows.value = v)} />
-      <Toggle label="Show trail" checked={render.showTrail.value} onChange={(v) => (render.showTrail.value = v)} />
-      <Toggle label="Show formula" checked={showFormula.value} onChange={(v) => (showFormula.value = v)} />
-      <Segmented<'full' | 'fade'>
-        label="Trail style"
-        options={[
-          { value: 'full', label: 'Full' },
-          { value: 'fade', label: 'Fading' },
-        ]}
-        value={render.trailMode.value}
-        disabled={!render.showTrail.value}
-        onChange={(v) => (render.trailMode.value = v)}
-      />
-      <LineWidthSlider />
-    </Group>
+    <Select<PipelineSettings['sampleCount']>
+      label="Samples"
+      options={[
+        { value: 2048, label: '2048 points' },
+        { value: 4096, label: '4096 points' },
+        { value: 8192, label: '8192 points' },
+      ]}
+      value={settings.sampleCount.value}
+      onChange={(v) => (settings.sampleCount.value = v)}
+    />
   )
 }
 
