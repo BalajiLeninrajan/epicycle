@@ -91,6 +91,10 @@ export function latestRunner<R>(task: () => Promise<R>, opts: LatestRunnerOption
   return {
     schedule() {
       clear()
+      // A run in flight now computes stale settings: drop its result and stay busy until
+      // the scheduled run finishes.
+      seq++
+      opts.onBusy?.(true)
       timer = timers.setTimeout(start, opts.delay)
     },
     flush: start,

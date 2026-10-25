@@ -65,7 +65,9 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: OverlayScene, dpr:
     ctx.fillRect(fit.x, fit.y, img.width * fit.s, img.height * fit.s)
     ctx.globalAlpha = 1
     // The outline comes in working-image pixels; the preview bitmap has the same size.
-    strokePolylines(ctx, scene.outline, fit.x, fit.y, fit.s, 0, 0)
+    // Pipeline coordinates put pixel (x, y)'s center at (x, y); on the photo that center is
+    // at (x + 0.5, y + 0.5), hence the -0.5 origin.
+    strokePolylines(ctx, scene.outline, fit.x, fit.y, fit.s, -0.5, -0.5)
     ctx.strokeStyle = c.ring
     ctx.lineWidth = 4 * dpr
     ctx.stroke()

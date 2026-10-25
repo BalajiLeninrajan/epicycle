@@ -27,6 +27,7 @@ import {
   removeMode,
   render,
   result,
+  running,
   samPoints,
   settings,
   showStrokes,
@@ -247,7 +248,8 @@ function AutoMaskNote() {
   if (samPoints.value.length > 0) return <span class="cn-meta">Using your mask ({samPoints.value.length} clicks).</span>
   if (seg.status === 'loading') return <span class="cn-meta">Drawing the whole image until the subject model loads.</span>
   if (seg.status === 'error') return <span class="cn-meta">The subject model failed, so the whole image is drawn.</span>
-  if (res && !res.masked && seg.status === 'ready') return <span class="cn-meta">No subject found, so the whole image is drawn.</span>
+  // While a run is in flight the shown result may predate the model; wait for the new one.
+  if (res && !res.masked && seg.status === 'ready' && !running.value) return <span class="cn-meta">No subject found, so the whole image is drawn.</span>
   return null
 }
 

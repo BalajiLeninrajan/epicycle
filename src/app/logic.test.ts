@@ -97,6 +97,29 @@ describe('latestRunner', () => {
     expect(onResult).toHaveBeenCalledWith(1)
   })
 
+  it('drops an in-flight result once a newer run is scheduled, and stays busy', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const first = deferred<string>()
+    const queue = [first.promise, Promise.resolve('new')]
+    const onResult = vi.fn()
+    const busy: boolean[] = []
+    const r = latestRunner(() => queue.shift()!, { delay: 120, onResult, onError: () => {}, onBusy: (v) => busy.push(v) })
+    r.flush()
+    r.schedule()
+    first.resolve('old')
+    vi.useRealTimers()
+    await tick()
+    expect(onResult).not.toHaveBeenCalled()
+    expect(busy.at(-1)).toBe(true)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    r.schedule()
+    vi.advanceTimersByTime(120)
+    vi.useRealTimers()
+    await tick()
+    expect(onResult).toHaveBeenCalledWith('new')
+    expect(busy.at(-1)).toBe(false)
+  })
+
   it('drops a stale result that arrives after a newer one', async () => {
     const a = deferred<string>()
     const b = deferred<string>()

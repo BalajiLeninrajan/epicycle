@@ -68,7 +68,15 @@ const runner = latestRunner<PipelineResult>(
   },
 )
 
+/** A result that arrived while a WebM was recording; applied when the recording ends. */
+let pendingResult: PipelineResult | null = null
+
 function applyResult(r: PipelineResult): void {
+  // Swapping the drawing mid-recording would splice two drawings into one video.
+  if (exporting.peek() === 'webm') {
+    pendingResult = r
+    return
+  }
   batch(() => {
     result.value = r
     error.value = null
@@ -124,43 +132,79 @@ function startModels(): void {
 
 // ── Sources ───────────────────────────────────────────────────────────────
 
+/** Bumped by every open; an open that finds a newer one started after its awaits gives up. */
+let openSeq = 0
+
+/** Thrown by an open that a newer open replaced; callers drop it silently. */
+class Superseded extends Error {}
+
+/** Drop in-flight work that belongs to the previous source. */
+function resetForNewSource(): void {
+  runner.cancel()
+  samSeq++
+  committedPoints = []
+  maskBusy.value = false
+  pendingResult = null
+}
+
 export async function openFile(file: File): Promise<void> {
+  const seq = ++openSeq
   error.value = null
   try {
     if (isSvgFile(file.type, file.name)) {
-      openSvg(await file.text(), file.name)
+      const text = await file.text()
+      if (seq !== openSeq) return
+      openSvg(text, file.name, seq)
     } else if (file.type === '' || file.type.startsWith('image/')) {
-      await openImage(file, file.name)
+      await openImage(file, file.name, seq)
     } else {
       throw new Error(`${file.name || 'That file'} is not an image or SVG`)
     }
   } catch (err) {
-    error.value = errorMessage(err)
+    if (seq === openSeq && !(err instanceof Superseded)) error.value = errorMessage(err)
   }
 }
 
-async function openImage(blob: Blob, name: string): Promise<void> {
+async function openImage(blob: Blob, name: string, seq = ++openSeq): Promise<void> {
   let bmp: ImageBitmap
   try {
     bmp = await createImageBitmap(blob)
   } catch {
     throw new Error(`Could not decode ${name || 'the image'}`)
   }
-  const scale = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height, 1))
-  if (scale < 1) {
-    const full = bmp
-    bmp = await createImageBitmap(full, {
-      resizeWidth: Math.max(1, Math.round(full.width * scale)),
-      resizeHeight: Math.max(1, Math.round(full.height * scale)),
-      resizeQuality: 'high',
-    })
-    full.close()
+  try {
+    const scale = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height, 1))
+    if (scale < 1) {
+      const full = bmp
+      try {
+        bmp = await createImageBitmap(full, {
+          resizeWidth: Math.max(1, Math.round(full.width * scale)),
+          resizeHeight: Math.max(1, Math.round(full.height * scale)),
+          resizeQuality: 'high',
+        })
+      } finally {
+        full.close()
+      }
+    }
+    if (seq !== openSeq) throw new Superseded()
+  } catch (err) {
+    bmp.close() // a no-op if the resize step already closed it
+    throw err
   }
-  runner.cancel()
-  samSeq++
-  committedPoints = []
+  resetForNewSource()
   // Structured clone: the worker gets its own copy and closes it; ours stays for the mask editor.
-  const size = await api().setImage(bmp)
+  let size: { width: number; height: number }
+  try {
+    size = await api().setImage(bmp)
+  } catch (err) {
+    bmp.close()
+    throw err
+  }
+  // A newer open has already called setImage on the worker, or will; leave it to that one.
+  if (seq !== openSeq) {
+    bmp.close()
+    throw new Superseded()
+  }
   svgData = null
   batch(() => {
     const old = preview.peek()
@@ -178,12 +222,11 @@ async function openImage(blob: Blob, name: string): Promise<void> {
   runner.flush()
 }
 
-function openSvg(text: string, name: string): void {
+function openSvg(text: string, name: string, seq = ++openSeq): void {
   const parsed = svgToStrokes(text)
   if (parsed.strokes.length === 0) throw new Error('This SVG has no shapes to draw')
-  runner.cancel()
-  samSeq++
-  committedPoints = []
+  if (seq !== openSeq) return
+  resetForNewSource()
   svgData = parsed
   batch(() => {
     preview.peek()?.close()
@@ -229,7 +272,15 @@ export async function pasteFromClipboard(): Promise<void> {
       const svgType = item.types.find((t) => t === 'image/svg+xml')
       if (svgType) return pasteSvgText(await (await item.getType(svgType)).text())
       const imageType = item.types.find((t) => t.startsWith('image/'))
-      if (imageType) return await openImage(await item.getType(imageType), 'pasted')
+      if (imageType) {
+        const seq = ++openSeq
+        try {
+          return await openImage(await item.getType(imageType), 'pasted', seq)
+        } catch (err) {
+          if (err instanceof Superseded) return
+          throw err
+        }
+      }
       if (item.types.includes('text/plain')) {
         const text = await (await item.getType('text/plain')).text()
         if (/<svg[\s>]/i.test(text)) return pasteSvgText(text)
@@ -386,6 +437,9 @@ export async function exportAs(kind: ExportKind): Promise<void> {
     error.value = `Export failed: ${errorMessage(err)}`
   } finally {
     exporting.value = null
+    const pending = pendingResult
+    pendingResult = null
+    if (pending) applyResult(pending)
   }
 }
 

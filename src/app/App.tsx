@@ -5,12 +5,14 @@ import { Panel } from './Panel'
 import { FileInput, pickFile, Stage } from './Stage'
 import { recording, source } from './state'
 
+const TEXT_INPUTS = new Set(['text', 'search', 'url', 'email', 'number', 'password', 'tel'])
+
 export function App() {
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      // Let text fields keep their own paste.
+      // Let text fields keep their own paste; sliders, toggles and selects don't take text.
       const t = e.target as HTMLElement | null
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      if (t && (t.isContentEditable || t.tagName === 'TEXTAREA' || (t instanceof HTMLInputElement && TEXT_INPUTS.has(t.type)))) return
       if (recording.peek()) return
       if (openFromClipboardData(e.clipboardData)) e.preventDefault()
     }
