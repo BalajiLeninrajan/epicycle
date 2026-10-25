@@ -1,0 +1,171 @@
+/* catppuccin-neu from its pinned tag, plus the fonts it expects. Both hosts send
+   Cross-Origin-Resource-Policy: cross-origin, so they load under COEP require-corp. */
+@import url("https://cdn.jsdelivr.net/gh/BalajiLeninrajan/catppuccin-neu@v0.4.1/css/index.css");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=JetBrains+Mono:wght@100..800&display=swap");
+
+/* Canvas colors, read from computed style by the renderer, the PNG export and the
+   overlay. Each is one palette color (no color-mix) so any canvas parses it. The
+   fallback hexes are the same Mocha values, for the moment before the stylesheet
+   arrives. The design system is dark only. */
+:root {
+  --fd-bg: var(--base, #1e1e2e);
+  --fd-trail: var(--yellow, #f9e2af);
+  --fd-circle: var(--surface-2, #585b70);
+  --fd-arrow: var(--subtext-0, #a6adc8);
+  --fd-stroke: var(--teal, #94e2d5);
+  --fd-outline: var(--mauve, #cba6f7);
+  --fd-add: var(--green, #a6e3a1);
+  --fd-remove: var(--red, #f38ba8);
+  --fd-ring: var(--crust, #11111b);
+  --fd-panel-w: 360px;
+}
+
+/* ── Layout: stage beside the panel, a bottom sheet on phones ───────────── */
+
+.fd-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--fd-panel-w);
+  gap: var(--space-4);
+  padding: var(--space-4);
+  min-height: 0;
+}
+.fd-main:not(:has(> .fd-panel)) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+
+.fd-stage-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.fd-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fd-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: var(--cn-radius-card);
+}
+
+.fd-overlay { pointer-events: none; }
+.fd-overlay.is-editing { pointer-events: auto; cursor: crosshair; }
+
+.fd-dropzone {
+  position: absolute;
+  inset: 0;
+  display: grid;
+}
+
+.fd-drop-hint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 2px dashed var(--mauve);
+}
+
+.fd-stage-status {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  right: var(--space-3);
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+
+.fd-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.fd-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.fd-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fd-sheet-toggle { display: none; }
+
+@media (max-width: 760px) {
+  .fd-main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(160px, 1fr) auto;
+  }
+  .fd-panel { max-height: 55dvh; }
+  .fd-panel:not([data-open]) .fd-panel-body { display: none; }
+  .fd-sheet-toggle { display: inline-flex; }
+  .fd-sheet-toggle svg { transition: transform var(--t-base) var(--ease-out); }
+  .fd-panel:not([data-open]) .fd-sheet-toggle svg { transform: rotate(180deg); }
+}
+
+/* ── Range slider. The package has no range recipe, so this follows the
+   progress track (carved crust groove) with a raised mauve thumb. ──────── */
+
+.fd-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.fd-range::-webkit-slider-runnable-track {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--crust);
+  box-shadow: var(--neu-inset-soft);
+}
+.fd-range::-moz-range-track {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--crust);
+  box-shadow: var(--neu-inset-soft);
+}
+.fd-range::-moz-range-progress {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--mauve);
+}
+.fd-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -5.5px;
+  border: 1px solid var(--edge);
+  border-radius: 50%;
+  background: var(--mauve);
+  box-shadow: var(--neu-raised-soft);
+  transition: transform var(--t-fast) var(--ease-spring), background-color var(--t-fast) var(--ease-out);
+}
+.fd-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--edge);
+  border-radius: 50%;
+  background: var(--mauve);
+  box-shadow: var(--neu-raised-soft);
+  transition: transform var(--t-fast) var(--ease-spring), background-color var(--t-fast) var(--ease-out);
+}
+.fd-range:hover:not(:disabled)::-webkit-slider-thumb { background: var(--pink); }
+.fd-range:hover:not(:disabled)::-moz-range-thumb { background: var(--pink); }
+.fd-range:active:not(:disabled)::-webkit-slider-thumb { transform: scale(.9); transition-duration: var(--t-press); }
+.fd-range:active:not(:disabled)::-moz-range-thumb { transform: scale(.9); transition-duration: var(--t-press); }
+.fd-range:focus-visible { outline-offset: 2px; }
+.fd-range:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
