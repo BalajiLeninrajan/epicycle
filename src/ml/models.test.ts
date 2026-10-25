@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { pickMultimask, samInputSize } from './sam'
 import { inputSize } from './segment'
 
 describe('inputSize', () => {
@@ -15,5 +16,16 @@ describe('inputSize', () => {
 
   it('never returns a zero side', () => {
     expect(inputSize(1024, 3).height).toBe(32)
+  })
+})
+
+describe('MobileSAM helpers', () => {
+  it('resizes the long side to 1024', () => {
+    expect(samInputSize(687, 1024)).toEqual({ width: 687, height: 1024 })
+    expect(samInputSize(500, 250)).toEqual({ width: 1024, height: 512 })
+  })
+  it('picks the best multimask candidate, never mask 0', () => {
+    expect(pickMultimask([0.99, 0.5, 0.9, 0.7])).toBe(2)
+    expect(pickMultimask([0.1, 0.8, 0.8, 0.2])).toBe(1)
   })
 })

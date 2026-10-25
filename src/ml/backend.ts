@@ -1,5 +1,4 @@
-import { env as hfEnv } from '@huggingface/transformers'
-// transformers.js imports this exact entry, so both share one ORT instance and one env.
+// The webgpu entry carries both the WebGPU and the wasm execution providers.
 import * as ort from 'onnxruntime-web/webgpu'
 import { fetchCached } from './fetch'
 
@@ -43,7 +42,7 @@ export const ORT_RUNTIME_BYTES = WASM_BYTES + MJS_BYTES
 
 let configured = false
 
-/** Configure ORT and transformers.js once. Safe to call repeatedly. */
+/** Configure ORT once. Safe to call repeatedly. */
 export function configureOrt(): void {
   if (configured) return
   configured = true
@@ -55,10 +54,6 @@ export function configureOrt(): void {
   // ORT logs graph optimizer notes as warnings on every session create.
   ort.env.logLevel = 'error'
   ort.env.wasm.wasmPaths = { mjs: ORT_MJS, wasm: ORT_WASM }
-  // ensureRuntime() caches the runtime itself; skip transformers.js's copy of it.
-  hfEnv.useWasmCache = false
-  hfEnv.allowLocalModels = false
-  hfEnv.useBrowserCache = true
   installSessionLock()
 }
 
@@ -113,10 +108,9 @@ let lockInstalled = false
 
 // The webgpu build of ORT uses asyncify, which can't have two suspended calls into the wasm
 // module at once: overlapping session.create / session.run calls corrupt it ("Session already
-// started"). transformers.js serializes its own creates and its own runs on two separate
-// chains, but knows nothing about our direct ORT sessions. Wrapping ORT's own entry points
-// puts every create and run, from either library, on one queue. Both libraries download
-// model files before calling create, so a large download does not block inference.
+// started"). Each model module creates and runs its own sessions, so wrapping ORT's entry
+// points puts every create and run on one queue. Model files are downloaded before
+// create is called, so a large download does not block inference.
 function installSessionLock(): void {
   if (lockInstalled) return
   lockInstalled = true
@@ -132,7 +126,7 @@ function installSessionLock(): void {
   }
 }
 
-// Before any transformers.js call can create a session.
+// Before any module can create a session.
 configureOrt()
 
 export { ort }

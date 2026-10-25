@@ -1,5 +1,5 @@
 // Streamed downloads kept in the Cache API, for files we fetch ourselves
-// (ORT runtime, line-art model). transformers.js caches its own files.
+// (ORT runtime and every model).
 
 export const MODEL_CACHE = 'fd-models-v1'
 

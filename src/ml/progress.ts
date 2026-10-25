@@ -1,12 +1,8 @@
 // Byte-weighted progress over several files, reported as one monotonic 0..1 value.
 
-import type { ProgressInfo } from '@huggingface/transformers'
-
 export interface Progress {
   /** Record bytes for one file. total 0 means unknown (counts as not started). */
   file(key: string, loaded: number, total: number): void
-  /** Feed a transformers.js progress event. Keys are prefixed so files of different models don't collide. */
-  transformers(info: ProgressInfo, prefix: string): void
   /** Report 1. Later updates are ignored. */
   done(): void
 }
@@ -47,20 +43,6 @@ export function createProgress(onProgress: (p: number) => void, expected: Record
     file(key, loaded, total) {
       set(key, loaded, total)
       emit()
-    },
-    transformers(info, prefix) {
-      if (info.status === 'progress_total') {
-        for (const [f, v] of Object.entries(info.files)) set(`${prefix}/${f}`, v.loaded, v.total)
-        emit()
-      } else if (info.status === 'progress') {
-        set(`${prefix}/${info.file}`, info.loaded, info.total)
-        emit()
-      } else if (info.status === 'done') {
-        // Cache hits can finish without byte events.
-        const f = files.get(`${prefix}/${info.file}`)
-        if (f) f.loaded = f.total
-        emit()
-      }
     },
     done() {
       if (finished) return

@@ -49,28 +49,6 @@ describe('createProgress', () => {
     expect(seen.every((v) => v < 1)).toBe(true)
   })
 
-  it('aggregates transformers.js events under a prefix', () => {
-    const seen: number[] = []
-    const p = createProgress((v) => seen.push(v), { runtime: 100, 'm/onnx/a.onnx': 100 })
-    p.transformers(
-      {
-        status: 'progress_total',
-        name: 'm',
-        progress: 0,
-        loaded: 0,
-        total: 300,
-        files: { 'onnx/a.onnx': { loaded: 0, total: 100 }, 'onnx/b.onnx': { loaded: 0, total: 200 } },
-      },
-      'm',
-    )
-    p.transformers({ status: 'progress', name: 'm', file: 'onnx/b.onnx', progress: 50, loaded: 100, total: 200 }, 'm')
-    expect(seen.at(-1)).toBeCloseTo(100 / 400)
-    // A cache hit can finish without byte events.
-    p.transformers({ status: 'done', name: 'm', file: 'onnx/a.onnx' }, 'm')
-    expect(seen.at(-1)).toBeCloseTo(200 / 400)
-    p.transformers({ status: 'initiate', name: 'm', file: 'x' }, 'm')
-    expect(seen.at(-1)).toBeCloseTo(200 / 400)
-  })
 })
 
 describe('sharedLoader', () => {

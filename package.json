@@ -12,7 +12,6 @@
     "deploy": "pnpm build && wrangler deploy"
   },
   "dependencies": {
-    "@huggingface/transformers": "4.3.1",
     "@preact/signals": "^2.11.3",
     "catppuccin-neu": "github:BalajiLeninrajan/catppuccin-neu#v0.4.1",
     "comlink": "^4.4.2",
@@ -30,9 +29,6 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "workerd"
-    ],
-    "patchedDependencies": {
-      "@huggingface/transformers@4.3.1": "patches/@huggingface__transformers@4.3.1.patch"
-    }
+    ]
   }
 }

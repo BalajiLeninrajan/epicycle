@@ -1,132 +1,121 @@
-import { AutoProcessor, type Processor, type ProgressInfo, RawImage, SamModel, Tensor } from '@huggingface/transformers'
 import type { GrayImage, SamPoint } from '../pipeline/types'
-import { type Backend, detectBackend, ensureRuntime, ORT_RUNTIME_BYTES } from './backend'
-import { createProgress, type Progress, sharedLoader } from './progress'
-import { argmax, grayImage, resizePlane, sigmoidInPlace } from './tensor'
+import { type Backend, detectBackend, ensureRuntime, ort, ORT_RUNTIME_BYTES } from './backend'
+import { fetchCached } from './fetch'
+import { createProgress, sharedLoader } from './progress'
+import { grayImage, rgbaToChw, sigmoidInPlace } from './tensor'
 
-// SlimSAM-77 (uniform pruning). From the Hub repo:
-//   preprocessor_config.json: longest edge 1024, pad bottom/right to 1024x1024, ImageNet mean/std.
-//   vision_encoder: pixel_values [1,3,1024,1024] -> image_embeddings, image_positional_embeddings [1,256,64,64]
-//   prompt_encoder_mask_decoder: input_points [1,1,n,2] (resized-image pixels), input_labels [1,1,n]
-//     (int64, 1 = include, 0 = exclude) -> iou_scores [1,1,3], pred_masks [1,1,3,256,256] logits
-//     over the padded 1024x1024 frame.
-// dtype: q8 ("_quantized", 13.8 MB total) on wasm. fp32 (39.8 MB) on WebGPU: the fp16 exports
-// are half the size but SAM's fp16 mask decoder is known to give broken masks.
-const MODEL_ID = 'Xenova/slimsam-77-uniform'
-const FILES = {
-  webgpu: { 'onnx/vision_encoder.onnx': 23_276_014, 'onnx/prompt_encoder_mask_decoder.onnx': 16_557_892 },
-  wasm: { 'onnx/vision_encoder_quantized.onnx': 8_882_165, 'onnx/prompt_encoder_mask_decoder_quantized.onnx': 4_903_810 },
-}
+// MobileSAM (Acly/MobileSAM, MIT), the TinyViT encoder distilled from SAM plus SAM's mask
+// decoder. Verified with onnxruntime:
+//   image encoder: 'input_image' float32 [H, W, 3], RGB in 0..255 with the long side resized
+//     to 1024. The graph normalizes, transposes and pads to 1024x1024 itself.
+//     -> 'image_embeddings' [1, 256, 64, 64]
+//   mask decoder (multi): 'image_embeddings', 'point_coords' [1, n, 2] in resized-image pixels,
+//     'point_labels' [1, n] float (1 = include, 0 = exclude, -1 = padding), 'mask_input'
+//     [1, 1, 256, 256], 'has_mask_input' [1], 'orig_im_size' [2] = (h, w)
+//     -> 'masks' [1, 4, h, w] logits at orig_im_size, 'iou_predictions' [1, 4]
+// Mask 0 is the single-mask answer; 1..3 are the multimask candidates, which suit a lone
+// click better since one point is ambiguous.
+//
+// SlimSAM was used before. Its encoder peaked at ~1.8 GB on CPU (global attention over 4096
+// tokens) and got the browser OOM-killed on an 8 GB laptop; MobileSAM peaks at ~360 MB.
+const BASE = 'https://huggingface.co/Acly/MobileSAM/resolve/main/'
+const ENCODER = { url: `${BASE}mobile_sam_image_encoder.onnx`, bytes: 28_157_093 }
+const DECODER = { url: `${BASE}sam_mask_decoder_multi.onnx`, bytes: 16_496_559 }
+const LONG_SIDE = 1024
 
 interface Embedding {
   width: number
   height: number
-  /** Size of the image inside the padded model frame. */
+  /** Size of the resized image the encoder saw (long side 1024). */
   inW: number
   inH: number
-  padW: number
-  padH: number
-  image_embeddings: Tensor
-  image_positional_embeddings: Tensor
+  embeddings: ort.Tensor
 }
 
-let model: SamModel | null = null
-let processor: Processor | null = null
+let encoder: ort.InferenceSession | null = null
+let decoder: ort.InferenceSession | null = null
 let embedding: Promise<Embedding> | null = null
 
-async function loadOn(backend: Backend, progress: Progress): Promise<void> {
-  const expected = FILES[backend]
-  for (const [f, size] of Object.entries(expected)) progress.file(`${MODEL_ID}/${f}`, 0, size)
-  model = (await SamModel.from_pretrained(MODEL_ID, {
-    device: backend,
-    dtype: backend === 'webgpu' ? 'fp32' : 'q8',
-    progress_callback: (info) => progress.transformers(info, MODEL_ID),
-  })) as SamModel
+async function createSessions(enc: Uint8Array, dec: Uint8Array, backend: Backend): Promise<Backend> {
+  if (backend === 'webgpu') {
+    try {
+      encoder = await ort.InferenceSession.create(enc, { executionProviders: ['webgpu'], graphOptimizationLevel: 'all' })
+      // The decoder is small and runs per click; wasm avoids GPU readback round trips.
+      decoder = await ort.InferenceSession.create(dec, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' })
+      return 'webgpu'
+    } catch (err) {
+      console.warn('SAM: WebGPU session failed, falling back to wasm', err)
+      await encoder?.release()
+      encoder = null
+    }
+  }
+  encoder = await ort.InferenceSession.create(enc, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' })
+  decoder ??= await ort.InferenceSession.create(dec, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' })
+  return 'wasm'
 }
 
 const load = sharedLoader(async (onProgress): Promise<Backend> => {
-  const progress = createProgress(onProgress, { runtime: ORT_RUNTIME_BYTES })
   try {
-    let backend = await detectBackend()
-    const proc = AutoProcessor.from_pretrained(MODEL_ID, {
-      progress_callback: (info: ProgressInfo) => progress.transformers(info, MODEL_ID),
+    const backend = await detectBackend()
+    const progress = createProgress(onProgress, {
+      runtime: ORT_RUNTIME_BYTES,
+      encoder: ENCODER.bytes,
+      decoder: DECODER.bytes,
     })
-    proc.catch(() => {}) // awaited below; don't report it as unhandled if the model fails first
-    // The runtime comes first and on its own: a runtime failure is not a WebGPU failure, and
-    // falling back while the WebGPU load kept running would leave two models racing.
-    await ensureRuntime((l, t) => progress.file('runtime', l, t))
-    progress.file('runtime', ORT_RUNTIME_BYTES, ORT_RUNTIME_BYTES)
-    try {
-      await loadOn(backend, progress)
-    } catch (err) {
-      if (backend !== 'webgpu') throw err
-      console.warn('SAM: WebGPU load failed, falling back to wasm', err)
-      backend = 'wasm'
-      await loadOn(backend, progress)
-    }
-    processor = await proc
+    const [, enc, dec] = await Promise.all([
+      ensureRuntime((l, t) => progress.file('runtime', l, t)).then(() =>
+        progress.file('runtime', ORT_RUNTIME_BYTES, ORT_RUNTIME_BYTES),
+      ),
+      fetchCached(ENCODER.url, (l, t) => progress.file('encoder', l, t)),
+      fetchCached(DECODER.url, (l, t) => progress.file('decoder', l, t)),
+    ])
+    const used = await createSessions(enc, dec, backend)
     progress.done()
-    return backend
+    return used
   } catch (err) {
     throw new Error(`Could not load the click-to-select model: ${err instanceof Error ? err.message : String(err)}`)
   }
 })
 
-/** Load SlimSAM. onProgress gets 0..1. */
+/** Load MobileSAM. onProgress gets 0..1. */
 export function loadSam(onProgress: (p: number) => void): Promise<Backend> {
   return load(onProgress)
 }
 
-/** RGBA composited over white, as 3-channel RGB. Matches what the other models see. */
-function toRgb(image: ImageData): Uint8ClampedArray {
-  const src = image.data
-  const out = new Uint8ClampedArray((src.length / 4) * 3)
-  for (let i = 0, j = 0; j < src.length; i += 3, j += 4) {
-    const a = src[j + 3]
-    if (a === 255) {
-      out[i] = src[j]
-      out[i + 1] = src[j + 1]
-      out[i + 2] = src[j + 2]
-    } else {
-      const k = a / 255
-      const bg = 255 - a
-      out[i] = src[j] * k + bg
-      out[i + 1] = src[j + 1] * k + bg
-      out[i + 2] = src[j + 2] * k + bg
-    }
-  }
-  return out
+/** Encoder input size: long side 1024, aspect kept. */
+export function samInputSize(width: number, height: number): { width: number; height: number } {
+  const s = LONG_SIDE / Math.max(width, height)
+  return { width: Math.max(1, Math.round(width * s)), height: Math.max(1, Math.round(height * s)) }
 }
 
-async function embed(m: SamModel, proc: Processor, image: ImageData): Promise<Embedding> {
+async function embed(enc: ort.InferenceSession, image: ImageData): Promise<Embedding> {
   const { width, height } = image
-  const inputs = (await proc(new RawImage(toRgb(image), width, height, 3))) as {
-    pixel_values: Tensor
-    reshaped_input_sizes: [number, number][]
+  const size = samInputSize(width, height)
+  // rgbaToChw with std 1/255 keeps 0..255 values; the encoder wants them interleaved (HWC).
+  const chw = rgbaToChw(image, size.width, size.height, [0, 0, 0], [1 / 255, 1 / 255, 1 / 255])
+  const plane = size.width * size.height
+  const hwc = new Float32Array(3 * plane)
+  for (let i = 0; i < plane; i++) {
+    hwc[3 * i] = chw[i]
+    hwc[3 * i + 1] = chw[plane + i]
+    hwc[3 * i + 2] = chw[2 * plane + i]
   }
-  const [inH, inW] = inputs.reshaped_input_sizes[0]
-  const pad = (proc.image_processor as { pad_size?: { width: number; height: number } } | undefined)?.pad_size
-  const { image_embeddings, image_positional_embeddings } = await m.get_image_embeddings({
-    pixel_values: inputs.pixel_values,
-  })
-  inputs.pixel_values.dispose()
-  return {
-    width,
-    height,
-    inW,
-    inH,
-    padW: pad?.width ?? 1024,
-    padH: pad?.height ?? 1024,
-    image_embeddings,
-    image_positional_embeddings,
+  const input = new ort.Tensor('float32', hwc, [size.height, size.width, 3])
+  try {
+    const out = await enc.run({ input_image: input })
+    return { width, height, inW: size.width, inH: size.height, embeddings: out.image_embeddings }
+  } finally {
+    input.dispose()
   }
 }
 
 /** Compute and cache image embeddings. */
 export function samSetImage(image: ImageData): Promise<void> {
-  if (!model || !processor) return Promise.reject(new Error('SAM is not loaded; call loadSam first'))
+  if (!encoder) return Promise.reject(new Error('SAM is not loaded; call loadSam first'))
   if (image.width === 0 || image.height === 0) return Promise.reject(new Error('SAM needs a non-empty image'))
-  const p = embed(model, processor, image)
+  // The embeddings are a 4 MB CPU tensor; older ones are left to GC, since a prediction
+  // for the previous image may still be reading them.
+  const p = embed(encoder, image)
   embedding = p
   p.catch(() => {
     if (embedding === p) embedding = null
@@ -138,36 +127,47 @@ const clamp01 = (v: number) => (v > 0 ? (v < 1 ? v : 1) : 0)
 
 /** Mask probability for the clicks, same size as the image passed to samSetImage. */
 export async function samPredict(points: SamPoint[]): Promise<GrayImage> {
-  if (!model) throw new Error('SAM is not loaded; call loadSam first')
+  if (!decoder) throw new Error('SAM is not loaded; call loadSam first')
   if (!embedding) throw new Error('samPredict called before samSetImage')
   const e = await embedding
   if (points.length === 0) return grayImage(e.width, e.height)
 
-  const n = points.length
+  // One padding point (label -1) stands in for the missing box prompt.
+  const n = points.length + 1
   const coords = new Float32Array(2 * n)
-  const labels = new BigInt64Array(n)
-  for (let i = 0; i < n; i++) {
-    // Normalized image coords -> pixels of the resized (unpadded) model input.
+  const labels = new Float32Array(n)
+  for (let i = 0; i < points.length; i++) {
     coords[2 * i] = clamp01(points[i].x) * e.inW
     coords[2 * i + 1] = clamp01(points[i].y) * e.inH
-    labels[i] = points[i].positive ? 1n : 0n
+    labels[i] = points[i].positive ? 1 : 0
   }
-  const out = (await model({
-    image_embeddings: e.image_embeddings,
-    image_positional_embeddings: e.image_positional_embeddings,
-    input_points: new Tensor('float32', coords, [1, 1, n, 2]),
-    input_labels: new Tensor('int64', labels, [1, 1, n]),
-  })) as { iou_scores: Tensor; pred_masks: Tensor }
+  labels[n - 1] = -1
+  const feeds = {
+    image_embeddings: e.embeddings,
+    point_coords: new ort.Tensor('float32', coords, [1, n, 2]),
+    point_labels: new ort.Tensor('float32', labels, [1, n]),
+    mask_input: new ort.Tensor('float32', new Float32Array(256 * 256), [1, 1, 256, 256]),
+    has_mask_input: new ort.Tensor('float32', new Float32Array(1), [1]),
+    orig_im_size: new ort.Tensor('float32', Float32Array.from([e.height, e.width]), [2]),
+  }
+  const out = await decoder.run(feeds)
+  try {
+    const iou = out.iou_predictions.data as Float32Array
+    const best = points.length === 1 ? pickMultimask(iou) : 0
+    const plane = e.width * e.height
+    const logits = (out.masks.data as Float32Array).slice(best * plane, (best + 1) * plane)
+    return grayImage(e.width, e.height, sigmoidInPlace(logits))
+  } finally {
+    for (const [k, t] of Object.entries(feeds)) if (k !== 'image_embeddings') t.dispose()
+    out.masks.dispose()
+    out.iou_predictions.dispose()
+    out.low_res_masks?.dispose()
+  }
+}
 
-  const dims = out.pred_masks.dims
-  const mh = dims[dims.length - 2]
-  const mw = dims[dims.length - 1]
-  const count = dims[dims.length - 3] ?? 1
-  const best = Math.max(0, argmax(out.iou_scores.data as Float32Array, 0, count))
-  const plane = (out.pred_masks.data as Float32Array).subarray(best * mh * mw, (best + 1) * mh * mw)
-  // The low-res mask covers the padded frame; keep the part that holds the image.
-  const logits = resizePlane(plane, mw, mh, e.width, e.height, (e.inW * mw) / e.padW, (e.inH * mh) / e.padH)
-  out.pred_masks.dispose()
-  out.iou_scores.dispose()
-  return grayImage(e.width, e.height, sigmoidInPlace(logits))
+/** Best of the multimask candidates 1..3 by predicted IoU. */
+export function pickMultimask(iou: ArrayLike<number>): number {
+  let best = 1
+  for (let i = 2; i < Math.min(4, iou.length); i++) if (iou[i] > iou[best]) best = i
+  return best
 }
