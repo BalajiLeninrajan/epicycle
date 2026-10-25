@@ -77,7 +77,7 @@ export const DEFAULT_SETTINGS: PipelineSettings = {
   detail: 0.5,
   includeSilhouette: true,
   stippleCount: 4000,
-  sampleCount: 4096,
+  sampleCount: 8192,
 }
 
 /** A SAM click in normalized image coordinates (0..1). */

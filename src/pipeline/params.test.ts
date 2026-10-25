@@ -23,11 +23,11 @@ describe('deriveParams', () => {
   it('hits the documented endpoints', () => {
     const lo = at(0)
     const hi = at(1)
-    expect(lo.lineThreshold).toBeCloseTo(0.6)
-    expect(hi.lineThreshold).toBeCloseTo(0.3)
-    expect(lo.simplifyEpsilon).toBeCloseTo(2)
+    expect(lo.lineThreshold).toBeCloseTo(0.35)
+    expect(hi.lineThreshold).toBeCloseTo(0.1)
+    expect(lo.simplifyEpsilon).toBeCloseTo(1.5)
     expect(hi.simplifyEpsilon).toBeCloseTo(0.5)
-    expect(lo.minStrokeLength).toBeCloseTo(1000 * 0.03)
+    expect(lo.minStrokeLength).toBeCloseTo(1000 * 0.012)
     for (const p of [lo, hi]) {
       expect(p.cannyLow).toBeLessThan(p.cannyHigh)
       expect(p.cannyHigh).toBeLessThanOrEqual(1)

@@ -1,77 +1,92 @@
-import { AutoModel, type PreTrainedModel, Tensor } from '@huggingface/transformers'
 import type { GrayImage } from '../pipeline/types'
-import { type Backend, detectBackend, ensureRuntime, ORT_RUNTIME_BYTES, webgpuHasF16 } from './backend'
+import { type Backend, detectBackend, ensureRuntime, ort, ORT_RUNTIME_BYTES } from './backend'
+import { fetchCached } from './fetch'
 import { createProgress, sharedLoader } from './progress'
-import { grayImage, resizePlane, rgbaToChw, sigmoidInPlace } from './tensor'
+import { grayImage, resizePlane, rgbaToChw } from './tensor'
 
-// BiRefNet-lite (Swin-T backbone). From the Hub repo:
-//   preprocessor_config.json: resize to 1024x1024 (aspect not kept), rescale 1/255,
-//   ImageNet mean/std normalization.
-//   onnx/model.onnx (224 MB fp32) and onnx/model_fp16.onnx (114 MB, float32 I/O).
-//   input 'input_image' float32 [1, 3, 1024, 1024] (fixed: other sizes are rejected)
-//   output 'output_image' float32 [1, 1, 1024, 1024], logits (the model card applies sigmoid).
+// MODNet portrait matting (Xenova/modnet, Apache-2.0). From the Hub repo:
+//   preprocessor_config.json: resize so the short edge is 512, sides divisible by 32,
+//   rescale 1/255, normalize with mean 0.5 / std 0.5.
+//   input 'input' float32 [batch, 3, height, width], dynamic size
+//   output 'output' float32 [batch, 1, height, width], alpha in [0, 1] (the graph ends in Sigmoid)
+// We use fp32 on both backends: the quantized file lets background through on portraits.
+// On a 768x512 input, CPU ORT peaks at about 270 MB RSS and takes about 0.3s.
 //
-// WASM can't run it. Measured with onnxruntime-web 1.31 (wasm backend, 1 thread) in node:
-// the wasm heap passes 3.6 GiB and the run fails with std::bad_alloc at the 4 GiB wasm32
-// limit. That holds for fp16 (CPU arena and memory patterns on or off) and fp32 (both off).
-// Since the input size is fixed, a smaller resolution is not an option. On wasm the loader
-// rejects, and the app falls back to SAM clicks or the whole image.
-const MODEL_ID = 'onnx-community/BiRefNet_lite-ONNX'
-const SIZE = 1024
-const MEAN = [0.485, 0.456, 0.406] as const
-const STD = [0.229, 0.224, 0.225] as const
-const FILE_BYTES = { fp16: 114_538_221, fp32: 224_005_088 }
+// BiRefNet-lite was the first choice. It was dropped because it is too heavy for the
+// devices this targets: on wasm it passes the 4 GiB heap limit at its fixed 1024x1024
+// input, and on an 8 GB laptop with an integrated GPU it got the browser OOM-killed.
+const MODEL_URL = 'https://huggingface.co/Xenova/modnet/resolve/main/onnx/model.onnx'
+const MODEL_BYTES = 25_888_640
+const SHORT_EDGE = 512
+const MULTIPLE = 32
+// Bounds the input for very wide or tall images.
+const MAX_LONG_EDGE = 1024
 
-let model: PreTrainedModel | null = null
+let session: ort.InferenceSession | null = null
+
+async function createSession(bytes: Uint8Array, backend: Backend): Promise<Backend> {
+  if (backend === 'webgpu') {
+    try {
+      session = await ort.InferenceSession.create(bytes, { executionProviders: ['webgpu'], graphOptimizationLevel: 'all' })
+      return 'webgpu'
+    } catch (err) {
+      console.warn('Subject model: WebGPU session failed, falling back to wasm', err)
+    }
+  }
+  session = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' })
+  return 'wasm'
+}
 
 const load = sharedLoader(async (onProgress): Promise<Backend> => {
-  const backend = await detectBackend()
-  if (backend !== 'webgpu') {
-    throw new Error(
-      'Automatic subject detection needs WebGPU: BiRefNet does not fit in WebAssembly memory. Click the subject to select it, or keep the background.',
-    )
-  }
-  // shader-f16 is optional in WebGPU; without it the fp16 graph can't run on the GPU.
-  const dtype = (await webgpuHasF16()) ? 'fp16' : 'fp32'
-  const file = `${MODEL_ID}/onnx/model${dtype === 'fp16' ? '_fp16' : ''}.onnx`
-  const progress = createProgress(onProgress, { runtime: ORT_RUNTIME_BYTES, [file]: FILE_BYTES[dtype] })
   try {
-    const [, m] = await Promise.all([
+    const backend = await detectBackend()
+    const progress = createProgress(onProgress, { runtime: ORT_RUNTIME_BYTES, model: MODEL_BYTES })
+    const [, bytes] = await Promise.all([
       ensureRuntime((l, t) => progress.file('runtime', l, t)).then(() =>
         progress.file('runtime', ORT_RUNTIME_BYTES, ORT_RUNTIME_BYTES),
       ),
-      AutoModel.from_pretrained(MODEL_ID, {
-        device: 'webgpu',
-        dtype,
-        progress_callback: (info) => progress.transformers(info, MODEL_ID),
-      }),
+      fetchCached(MODEL_URL, (l, t) => progress.file('model', l, t)),
     ])
-    model = m
+    const used = await createSession(bytes, backend)
+    progress.done()
+    return used
   } catch (err) {
     throw new Error(`Could not load the subject detection model: ${err instanceof Error ? err.message : String(err)}`)
   }
-  progress.done()
-  return 'webgpu'
 })
 
-/** Load BiRefNet-lite. onProgress gets 0..1. */
+/** Load MODNet. onProgress gets 0..1. */
 export function loadSegmenter(onProgress: (p: number) => void): Promise<Backend> {
   return load(onProgress)
 }
 
+/** Model input size: short edge 512, long edge capped, both multiples of 32. */
+export function inputSize(width: number, height: number): { width: number; height: number } {
+  const scale = Math.min(SHORT_EDGE / Math.min(width, height), MAX_LONG_EDGE / Math.max(width, height))
+  const round = (v: number) => Math.max(MULTIPLE, Math.round((v * scale) / MULTIPLE) * MULTIPLE)
+  return { width: round(width), height: round(height) }
+}
+
 /** Foreground probability, same size as the input. */
 export async function segment(image: ImageData): Promise<GrayImage> {
-  if (!model) throw new Error('Subject detection model is not loaded; call loadSegmenter first')
+  if (!session) throw new Error('Subject detection model is not loaded; call loadSegmenter first')
   const { width, height } = image
   if (width === 0 || height === 0) return grayImage(width, height)
-  const input = new Tensor('float32', rgbaToChw(image, SIZE, SIZE, MEAN, STD), [1, 3, SIZE, SIZE])
-  const { output_image } = (await model({ input_image: input })) as { output_image?: Tensor }
-  if (!output_image) throw new Error('Subject detection returned no output_image')
-  const dims = output_image.dims
-  const oh = dims[dims.length - 2]
-  const ow = dims[dims.length - 1]
-  // Resample logits, then squash: edges stay sharper than resampling probabilities.
-  const logits = resizePlane(output_image.data as Float32Array, ow, oh, width, height)
-  output_image.dispose()
-  return grayImage(width, height, sigmoidInPlace(logits))
+  const size = inputSize(width, height)
+  const input = new ort.Tensor('float32', rgbaToChw(image, size.width, size.height, [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]), [
+    1,
+    3,
+    size.height,
+    size.width,
+  ])
+  const outputs = await session.run({ input })
+  const out = outputs.output
+  try {
+    if (!out) throw new Error('Subject detection returned no output')
+    const [, , oh, ow] = out.dims
+    return grayImage(width, height, resizePlane(out.data as Float32Array, ow, oh, width, height))
+  } finally {
+    input.dispose()
+    out?.dispose()
+  }
 }

@@ -64,6 +64,8 @@ export function configureOrt(): void {
   // Leave a core for the UI thread; ORT gains little past 4.
   ort.env.wasm.numThreads = globalThis.crossOriginIsolated ? Math.max(1, Math.min(4, hc - 1)) : 1
   ort.env.wasm.proxy = false // we already run in a worker
+  // ORT logs graph optimizer notes as warnings on every session create.
+  ort.env.logLevel = 'error'
   ort.env.wasm.wasmPaths = { mjs: ORT_MJS, wasm: ORT_WASM }
   // ensureRuntime() caches the runtime itself; skip transformers.js's copy of it.
   hfEnv.useWasmCache = false

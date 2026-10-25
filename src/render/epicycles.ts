@@ -24,7 +24,7 @@ export interface RenderOptions {
 }
 
 export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
-  circles: 200,
+  circles: 1000,
   durationSec: 20,
   showCircles: true,
   showArrows: true,
