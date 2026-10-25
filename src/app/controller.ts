@@ -6,7 +6,7 @@ import type { ModelId, PipelineResult, Polyline, SamPoint } from '../pipeline/ty
 import { EpicycleRenderer, type RenderOptions } from '../render/epicycles'
 import { exportPng, pathToSvg, recordWebm } from '../render/export'
 import type { PipelineApi } from '../worker/api'
-import { getPipeline } from '../worker/client'
+import { getPipeline, onPipelineFailure } from '../worker/client'
 import { baseName, errorMessage, isSvgFile, latestRunner } from './logic'
 import {
   error,
@@ -42,6 +42,14 @@ let modelsStarted = false
 let svgData: { strokes: Polyline[]; width: number; height: number } | null = null
 let renderer: EpicycleRenderer | null = null
 let stageCanvas: HTMLCanvasElement | null = null
+
+onPipelineFailure((message) => {
+  batch(() => {
+    error.value = message
+    running.value = false
+    maskBusy.value = false
+  })
+})
 
 function api(): Remote<PipelineApi> {
   pipeline ??= getPipeline()
@@ -422,7 +430,7 @@ export async function exportAs(kind: ExportKind): Promise<void> {
       blob = await exportPng(r.coeffs, r.sampled, renderer?.options ?? currentRenderOptions(), PNG_SIZE)
       ext = 'png'
     } else if (kind === 'svg') {
-      const svg = pathToSvg(r.path, r.width, r.height, render.hideJumps.peek())
+      const svg = pathToSvg(r.path, r.width, r.height, render.hideJumps.peek(), source.peek() === 'image' ? 0.5 : 0)
       blob = new Blob([svg], { type: 'image/svg+xml' })
       ext = 'svg'
     } else {

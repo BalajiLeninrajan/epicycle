@@ -56,14 +56,16 @@ export function createProgress(onProgress: (p: number) => void, expected: Record
  * Wrap a loader so concurrent and repeated calls share one promise. Every caller's
  * onProgress receives updates from then on. A failed load is forgotten so a later call retries.
  */
-export function sharedLoader<T>(load: (onProgress: (p: number) => void) => Promise<T>): (onProgress?: (p: number) => void) => Promise<T> {
+export function sharedLoader<T>(
+  load: (onProgress: (p: number) => void) => Promise<T>,
+): ((onProgress?: (p: number) => void) => Promise<T>) & { reset(): void } {
   let pending: Promise<T> | null = null
   const listeners = new Set<(p: number) => void>()
   const emit = (p: number) => {
     for (const l of listeners) l(p)
   }
   let loaded = false
-  return (onProgress) => {
+  const fn = (onProgress?: (p: number) => void): Promise<T> => {
     if (loaded) {
       onProgress?.(1)
       return pending as Promise<T>
@@ -86,4 +88,11 @@ export function sharedLoader<T>(load: (onProgress: (p: number) => void) => Promi
     }
     return pending
   }
+  /** Forget a finished load, so the next call loads again. A load in flight is left alone. */
+  fn.reset = () => {
+    if (!loaded) return
+    loaded = false
+    pending = null
+  }
+  return fn
 }

@@ -13,6 +13,11 @@ function dOf(svg: string): string | null {
 }
 
 describe('pathToSvg', () => {
+  it('shifts coordinates by the pixel-center offset', () => {
+    const p = path([0, 0, 4, 0], [0, 0])
+    expect(dOf(pathToSvg(p, 10, 10, false, 0.5))).toBe('M0.5 0.5L4.5 0.5Z')
+  })
+
   // Square with the second side (1 -> 2) a connecting jump.
   const square = path([0, 0, 10, 0, 10, 10, 0, 10], [0, 1, 0, 0])
 

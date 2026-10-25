@@ -49,6 +49,13 @@ const load = sharedLoader(async (onProgress) => {
   }
 })
 
+/** Drop the session after it failed at inference, so the next load builds a fresh one. */
+export function resetLineArt(): void {
+  void session?.release().catch(() => {})
+  session = null
+  load.reset()
+}
+
 /** Load Informative Drawings (line art). onProgress gets 0..1. */
 export function loadLineArt(onProgress: (p: number) => void): Promise<Backend> {
   return load(onProgress)

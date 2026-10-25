@@ -55,6 +55,13 @@ const load = sharedLoader(async (onProgress): Promise<Backend> => {
   }
 })
 
+/** Drop the session after it failed at inference, so the next load builds a fresh one. */
+export function resetSegmenter(): void {
+  void session?.release().catch(() => {})
+  session = null
+  load.reset()
+}
+
 /** Load MODNet. onProgress gets 0..1. */
 export function loadSegmenter(onProgress: (p: number) => void): Promise<Backend> {
   return load(onProgress)

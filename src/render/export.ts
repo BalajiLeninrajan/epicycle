@@ -106,8 +106,12 @@ export async function recordWebm(canvas: HTMLCanvasElement, renderer: EpicycleRe
   return new Blob(chunks, { type: recorder.mimeType || mimeType || 'video/webm' })
 }
 
-/** The single-line path as an SVG document. Jump segments are omitted when hideJumps is true. */
-export function pathToSvg(path: SinglePath, width: number, height: number, hideJumps: boolean): string {
+/**
+ * The single-line path as an SVG document. Jump segments are omitted when hideJumps is true.
+ * offset is added to every coordinate: image mode passes 0.5, because pipeline points put
+ * pixel (x, y)'s center at (x, y) while in the viewBox that center is at (x + 0.5, y + 0.5).
+ */
+export function pathToSvg(path: SinglePath, width: number, height: number, hideJumps: boolean, offset = 0): string {
   const pts = path.points
   const jump = path.jump
   const count = pts.length >> 1
@@ -123,12 +127,12 @@ export function pathToSvg(path: SinglePath, width: number, height: number, hideJ
         continue
       }
       if (!pen) {
-        d.push(`M${fmt(pts[2 * i])} ${fmt(pts[2 * i + 1])}`)
+        d.push(`M${fmt(pts[2 * i] + offset)} ${fmt(pts[2 * i + 1] + offset)}`)
         pen = true
         subStart = i
       }
-      if (i + 1 < count) d.push(`L${fmt(pts[2 * i + 2])} ${fmt(pts[2 * i + 3])}`)
-      else d.push(subStart === 0 ? 'Z' : `L${fmt(pts[0])} ${fmt(pts[1])}`)
+      if (i + 1 < count) d.push(`L${fmt(pts[2 * i + 2] + offset)} ${fmt(pts[2 * i + 3] + offset)}`)
+      else d.push(subStart === 0 ? 'Z' : `L${fmt(pts[0] + offset)} ${fmt(pts[1] + offset)}`)
     }
   }
 

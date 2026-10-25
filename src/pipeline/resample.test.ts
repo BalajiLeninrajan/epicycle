@@ -104,3 +104,17 @@ describe('resample', () => {
     expect(r.scale).toBe(1)
   })
 })
+
+describe('resample jump flags', () => {
+  it('flags the sample after a jump shorter than the step', () => {
+    // Two 100px strokes joined by 4px jumps; 16 samples are ~13px apart.
+    const path = { points: Float32Array.from([0, 0, 100, 0, 100, 4, 0, 4]), jump: Uint8Array.from([0, 1, 0, 1]) }
+    const r = resample(path, 16)
+    const step = 208 / 16
+    const firstAfter = Math.ceil(104 / step)
+    expect(r.jump[firstAfter]).toBe(1)
+    // The closing jump is crossed on the wrap back to sample 0.
+    expect(r.jump[0]).toBe(1)
+    expect(r.jump.reduce((a, b) => a + b, 0)).toBe(2)
+  })
+})

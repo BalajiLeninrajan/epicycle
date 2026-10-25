@@ -30,10 +30,16 @@ export function resample(path: SinglePath, n: number): SampledPath {
   let cum = 0
   let sumX = 0
   let sumY = 0
+  // A jump shorter than the step can fall between two samples; the sample after it must
+  // still be flagged, or the trail draws a line across the gap.
+  let crossed = 0
   for (let k = 0; k < n; k++) {
     const s = k * step
     // Zero-length segments are skipped because cum + 0 <= s.
-    while (seg < c - 1 && cum + segLen[seg] <= s) cum += segLen[seg++]
+    while (seg < c - 1 && cum + segLen[seg] <= s) {
+      crossed |= path.jump[seg]
+      cum += segLen[seg++]
+    }
     const l = segLen[seg]
     let t = l > 0 ? (s - cum) / l : 0
     if (t > 1) t = 1
@@ -45,9 +51,19 @@ export function resample(path: SinglePath, n: number): SampledPath {
     const y = y0 + (pts[2 * j + 1] - y0) * t
     re[k] = x
     im[k] = y
-    jump[k] = path.jump[seg] ? 1 : 0
+    // A crossed jump only needs this sample flagged when the previous one didn't already break the line.
+    jump[k] = path.jump[seg] || (crossed && (k === 0 || !jump[k - 1])) ? 1 : 0
+    crossed = 0
     sumX += x
     sumY += y
+  }
+
+  // Jumps after the last sample, up to the closing segment, are crossed on the wrap to sample 0.
+  for (let i = seg + 1; i < c && !jump[n - 1]; i++) {
+    if (path.jump[i]) {
+      jump[0] = 1
+      break
+    }
   }
 
   const centerX = sumX / n

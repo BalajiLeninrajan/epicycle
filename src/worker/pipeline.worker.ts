@@ -1,9 +1,9 @@
 // Pipeline worker entry. Exposes PipelineApi with Comlink.
 import { expose } from 'comlink'
 import type { Backend } from '../ml/backend'
-import { lineArt, loadLineArt } from '../ml/lineart'
+import { lineArt, loadLineArt, resetLineArt } from '../ml/lineart'
 import { loadSam, samPredict, samSetImage } from '../ml/sam'
-import { loadSegmenter, segment } from '../ml/segment'
+import { loadSegmenter, resetSegmenter, segment } from '../ml/segment'
 import { createPipeline } from '../pipeline/pipeline'
 import type { ModelId, ModelState } from '../pipeline/types'
 import type { PipelineApi } from './api'
@@ -39,7 +39,10 @@ const pipeline = createPipeline({
   lineArtReady: () => states.lineart.status === 'ready',
   loadSam: () => loadModel('sam'),
   onInferenceError(id, err) {
-    // Keep the loaded session out of later runs; a reload goes through loadModel's retry.
+    // Drop the session (a lost WebGPU device won't recover) and forget the finished load,
+    // so Retry goes through loadModel and builds a new one.
+    ;(id === 'segment' ? resetSegmenter : resetLineArt)()
+    delete loading[id]
     report(id, { status: 'error', message: err instanceof Error ? err.message : String(err) })
   },
 })

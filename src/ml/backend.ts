@@ -120,7 +120,19 @@ function installSessionLock(): void {
   const create = factory.create.bind(factory)
   const run = factory.prototype.run
   // Sessions can't exist before the runtime, so waiting for it here only delays creates.
-  factory.create = (...args) => exclusive(() => ensureRuntime().then(() => create(...args)))
+  factory.create = (...args) =>
+    exclusive(() =>
+      ensureRuntime()
+        .then(() => create(...args))
+        .catch((err: unknown) => {
+          // ORT remembers a failed wasm init and refuses every later session in this worker.
+          const msg = err instanceof Error ? err.message : String(err)
+          if (/initializeWebAssembly|initWasm/.test(msg)) {
+            throw new Error(`The ONNX Runtime failed to start (${msg}). Reload the page to try again.`)
+          }
+          throw err
+        }),
+    )
   factory.prototype.run = function (...args) {
     return exclusive(() => run.apply(this, args))
   }
