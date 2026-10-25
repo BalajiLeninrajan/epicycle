@@ -1,7 +1,7 @@
 // Pipeline orchestration with per-stage caching. Pure: models are injected, so it runs in node tests.
 import { computeCoeffs } from '../fourier/epicycles'
 import { canny } from './canny'
-import { outerContours } from './contour'
+import { outerContours, trimImageBorder } from './contour'
 import { toGray } from './image'
 import { and, close, dilate, fillHoles, removeSmallComponents, threshold } from './morph'
 import { orderStrokes } from './order'
@@ -252,7 +252,7 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
       const outline = outlineOf(s, info, timings)
       const silKey = `${info.key}|${params.minStrokeLength}|${params.simplifyEpsilon}`
       const sil = memo(s, 'silhouette', silKey, timings, () =>
-        cleanStrokes(outline, params.minStrokeLength, params.simplifyEpsilon),
+        cleanStrokes(trimImageBorder(outline, s.width, s.height), params.minStrokeLength, params.simplifyEpsilon),
       )
       if (sil.length > 0) {
         strokesKey = `${cleanKey}|sil|${silKey}`

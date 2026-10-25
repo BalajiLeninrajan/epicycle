@@ -108,3 +108,52 @@ export function outerContours(mask: BinaryImage): Polyline[] {
   }
   return out
 }
+
+/**
+ * Cut the parts of contours that run along the image border. A mask that touches the
+ * edge gets an outline along the frame, which isn't part of the subject's shape.
+ * Contours from outerContours sit half a pixel outside the mask, so a border point has
+ * x < 0, y < 0, x > width - 1 or y > height - 1. Closed contours with no border run are
+ * returned unchanged; the rest are split into open polylines.
+ */
+export function trimImageBorder(contours: Polyline[], width: number, height: number): Polyline[] {
+  const out: Polyline[] = []
+  const onBorder = (x: number, y: number) => x < 0 || y < 0 || x > width - 1 || y > height - 1
+  for (const c of contours) {
+    const n = c.length / 2
+    if (n < 2) continue
+    // Segment i joins point i and i + 1; it is dropped when both ends lie on the border.
+    const drop = new Uint8Array(n - 1)
+    let first = -1
+    for (let i = 0; i < n - 1; i++) {
+      if (onBorder(c[2 * i], c[2 * i + 1]) && onBorder(c[2 * i + 2], c[2 * i + 3])) {
+        drop[i] = 1
+        if (first < 0) first = i
+      }
+    }
+    if (first < 0) {
+      out.push(c)
+      continue
+    }
+    const closed = c[0] === c[2 * n - 2] && c[1] === c[2 * n - 1]
+    // For a closed contour, start right after a dropped segment so no kept run wraps around.
+    const segs = n - 1
+    const start = closed ? first + 1 : 0
+    let run: number[] = []
+    const flush = () => {
+      if (run.length >= 4) out.push(Float32Array.from(run))
+      run = []
+    }
+    for (let k = 0; k < segs; k++) {
+      const i = (start + k) % segs
+      if (drop[i]) {
+        flush()
+        continue
+      }
+      if (run.length === 0) run.push(c[2 * i], c[2 * i + 1])
+      run.push(c[2 * i + 2], c[2 * i + 3])
+    }
+    flush()
+  }
+  return out
+}

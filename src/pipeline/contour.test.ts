@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { outerContours } from './contour'
+import { outerContours, trimImageBorder } from './contour'
 import type { BinaryImage, Polyline } from './types'
 
 function mask(w: number, h: number, f: (x: number, y: number) => boolean): BinaryImage {
@@ -117,5 +117,42 @@ describe('outerContours', () => {
     const out = outerContours(mask(4, 4, (x, y) => (x === 1 && y === 1) || (x === 2 && y === 2)))
     expect(out).toHaveLength(1)
     expect(area(out[0])).toBeGreaterThan(0)
+  })
+})
+
+describe('trimImageBorder', () => {
+  const square = (x0: number, y0: number, x1: number, y1: number) =>
+    Float32Array.from([x0, y0, x1, y0, x1, y1, x0, y1, x0, y0])
+
+  it('keeps contours away from the border', () => {
+    const c = square(2, 2, 5, 5)
+    expect(trimImageBorder([c], 10, 10)).toEqual([c])
+  })
+
+  it('drops the run along the bottom edge and keeps the rest as one open polyline', () => {
+    // Blob touching the bottom of a 10x10 image: its outline runs along y = 9.5.
+    const c = Float32Array.from([2, 3, 6, 3, 6, 9.5, 2, 9.5, 2, 3])
+    const out = trimImageBorder([c], 10, 10)
+    expect(out).toHaveLength(1)
+    expect(Array.from(out[0])).toEqual([2, 9.5, 2, 3, 6, 3, 6, 9.5])
+  })
+
+  it('removes a contour that lies entirely on the border', () => {
+    expect(trimImageBorder([square(-0.5, -0.5, 9.5, 9.5)], 10, 10)).toEqual([])
+  })
+
+  it('trims real outlines of a mask touching two edges', () => {
+    const w = 20
+    const h = 20
+    const data = new Uint8Array(w * h)
+    for (let y = 8; y < h; y++) for (let x = 0; x < 12; x++) data[y * w + x] = 1
+    const out = trimImageBorder(outerContours({ width: w, height: h, data }), w, h)
+    expect(out.length).toBeGreaterThan(0)
+    for (const p of out) {
+      for (let i = 0; i + 3 < p.length; i += 2) {
+        const border = (x: number, y: number) => x < 0 || y < 0 || x > w - 1 || y > h - 1
+        expect(border(p[i], p[i + 1]) && border(p[i + 2], p[i + 3])).toBe(false)
+      }
+    }
   })
 })
