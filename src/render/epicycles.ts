@@ -2,7 +2,7 @@ import { evalChain, reconstruct } from '../fourier/epicycles'
 import type { Coeffs, SampledPath } from '../pipeline/types'
 import { newCamera, stepCamera, viewTransform, type View } from './camera'
 import { mixRgb, parseRgb, readThemeColors, type ThemeColors } from './theme'
-import { FADE_BUCKETS, bucketAlpha, bucketStart, fadeLength, resampleJump, trailSize, traceTrail } from './trail'
+import { FADE_BUCKETS, JUMP_ALPHA, NO_SINK, bucketAlpha, bucketStart, fadeLength, resampleJump, trailSize, traceTrail } from './trail'
 
 export interface RenderOptions {
   /** Number of circles K. */
@@ -12,9 +12,8 @@ export interface RenderOptions {
   showCircles: boolean
   showArrows: boolean
   showTrail: boolean
+  /** 'fade': the line fades with age over one loop, like 3Blue1Brown's. 'full': the drawing stays. */
   trailMode: 'full' | 'fade'
-  /** Skip trail segments that lie on connecting jumps. */
-  hideJumps: boolean
   /** Camera follows the tip. */
   followTip: boolean
   /** Zoom factor while following. */
@@ -29,8 +28,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   showCircles: true,
   showArrows: true,
   showTrail: true,
-  trailMode: 'full',
-  hideJumps: true,
+  trailMode: 'fade',
   followTip: false,
   followZoom: 6,
   lineWidth: 2,
@@ -72,6 +70,11 @@ export class EpicycleRenderer {
   private colorsDirty = true
   /** Opaque trail color per fade bucket, premixed with the background (see refreshColors). */
   private fadeColors: string[] = []
+  /** Same, for connecting jumps, which draw at JUMP_ALPHA of the line around them. */
+  private fadeJumpColors: string[] = []
+  private jumpColor = ''
+  /** True once the tip has gone all the way around, so the trail continues past t = 0. */
+  private looped = false
   private dprQuery: MediaQueryList | null = null
   private readonly cam = newCamera()
   private readonly view: View = { ox: 0, oy: 0, s: 1 }
@@ -105,6 +108,7 @@ export class EpicycleRenderer {
     this.coeffs = coeffs
     this.sampled = sampled
     this.trailJump = resampleJump(sampled.jump, trailSize(sampled.re.length))
+    this.looped = false
     this.k = -1
     this.updateTrail()
     this.requestDraw()
@@ -143,6 +147,7 @@ export class EpicycleRenderer {
   playOnce(): Promise<void> {
     this.finishOnce()
     this.t = 0
+    this.looped = false
     this.lastTs = 0
     this.opts = { ...this.opts, playing: true }
     const done = new Promise<void>((resolve) => (this.onceDone = resolve))
@@ -200,6 +205,7 @@ export class EpicycleRenderer {
           this.opts = { ...this.opts, playing: false }
         } else {
           this.t -= Math.floor(this.t)
+          this.looped = true
         }
       }
     }
@@ -233,10 +239,14 @@ export class EpicycleRenderer {
     this.colorsDirty = false
     const fg = parseRgb(this.ctx, this.colors.trail)
     const bg = parseRgb(this.ctx, this.colors.bg)
+    const mix = (a: number) => (fg && bg ? mixRgb(fg, bg, a) : this.colors.trail)
     this.fadeColors = []
+    this.fadeJumpColors = []
     for (let b = 0; b < FADE_BUCKETS; b++) {
-      this.fadeColors.push(fg && bg ? mixRgb(fg, bg, bucketAlpha(b, FADE_BUCKETS)) : this.colors.trail)
+      this.fadeColors.push(mix(bucketAlpha(b, FADE_BUCKETS)))
+      this.fadeJumpColors.push(mix(bucketAlpha(b, FADE_BUCKETS) * JUMP_ALPHA))
     }
+    this.jumpColor = mix(JUMP_ALPHA)
   }
 
   /**
@@ -309,38 +319,56 @@ export class EpicycleRenderer {
   }
 
   private drawTrail(view: View, tipSx: number, tipSy: number): void {
-    const ctx = this.ctx
-    const xs = this.trailRe
-    const ys = this.trailIm
-    const n = xs.length
+    const n = this.trailRe.length
     if (n === 0) return
-    const jump = this.opts.hideJumps ? this.trailJump : null
-    const { ox, oy, s } = view
     // Last trail sample at or before t; m = n closes the loop back to sample 0.
     const m = Math.min(n, Math.floor(this.t * n))
-    ctx.strokeStyle = this.colors.trail
-    ctx.lineWidth = this.opts.lineWidth * this.dpr
+    const tipX = m < n ? tipSx : Number.NaN
+    const tipY = m < n ? tipSy : Number.NaN
+    this.ctx.lineWidth = this.opts.lineWidth * this.dpr
 
     if (this.opts.trailMode === 'full') {
-      ctx.beginPath()
-      const pen = traceTrail(ctx, xs, ys, jump, 0, m + 1, ox, oy, s)
-      if (pen && m < n) ctx.lineTo(tipSx, tipSy)
-      ctx.stroke()
+      // After the first loop the whole drawing stays up.
+      if (this.looped) this.strokeRun(view, 0, n + 1, Number.NaN, Number.NaN, this.colors.trail, this.jumpColor)
+      else this.strokeRun(view, 0, m + 1, tipX, tipY, this.colors.trail, this.jumpColor)
       return
     }
 
+    // One loop of tail ending at the tip, split into buckets by age. Before the first wrap,
+    // points from before t = 0 haven't been drawn yet and are skipped.
     const len = fadeLength(n)
     const start = m - len + 1
+    const first = this.looped ? 0 : -start
     for (let b = 0; b < FADE_BUCKETS; b++) {
-      const s0 = bucketStart(b, FADE_BUCKETS, len)
-      const s1 = b === FADE_BUCKETS - 1 ? len - 1 : bucketStart(b + 1, FADE_BUCKETS, len)
-      if (s1 <= s0 && b < FADE_BUCKETS - 1) continue
-      ctx.beginPath()
-      const pen = traceTrail(ctx, xs, ys, jump, start + s0, s1 - s0 + 1, ox, oy, s)
-      if (pen && b === FADE_BUCKETS - 1 && m < n) ctx.lineTo(tipSx, tipSy)
-      ctx.strokeStyle = this.fadeColors[b] ?? this.colors.trail
-      ctx.stroke()
+      const last = b === FADE_BUCKETS - 1
+      const s0 = Math.max(bucketStart(b, FADE_BUCKETS, len), first)
+      const s1 = last ? len - 1 : bucketStart(b + 1, FADE_BUCKETS, len)
+      if (s1 < s0 || (s1 === s0 && !last)) continue
+      this.strokeRun(
+        view,
+        start + s0,
+        s1 - s0 + 1,
+        last ? tipX : Number.NaN,
+        last ? tipY : Number.NaN,
+        this.fadeColors[b] ?? this.colors.trail,
+        this.fadeJumpColors[b] ?? this.jumpColor,
+      )
     }
+  }
+
+  /** Stroke count trail points from start: jumps first in their fainter color, then the line over them. */
+  private strokeRun(view: View, start: number, count: number, tipX: number, tipY: number, line: string, jumps: string): void {
+    const ctx = this.ctx
+    const { ox, oy, s } = view
+    const jump = this.trailJump
+    ctx.beginPath()
+    traceTrail(NO_SINK, ctx, this.trailRe, this.trailIm, jump, start, count, ox, oy, s, tipX, tipY)
+    ctx.strokeStyle = jumps
+    ctx.stroke()
+    ctx.beginPath()
+    traceTrail(ctx, NO_SINK, this.trailRe, this.trailIm, jump, start, count, ox, oy, s, tipX, tipY)
+    ctx.strokeStyle = line
+    ctx.stroke()
   }
 
   private drawCircles(coeffs: Coeffs, view: View, w: number, h: number): void {

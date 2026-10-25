@@ -67,6 +67,7 @@ export const maskOutline = signal<Polyline[]>([])
 export const maskBusy = signal(false)
 
 export const showStrokes = signal(false)
+export const showFormula = signal(true)
 
 /** Animation time in [0, 1), pushed from renderer.onTime. */
 export const time = signal(0)

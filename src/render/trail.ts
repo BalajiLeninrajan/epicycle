@@ -5,10 +5,13 @@ export interface PathSink {
 }
 
 /** Number of alpha steps the fade tail is split into. Each step is one stroke. */
-export const FADE_BUCKETS = 8
+export const FADE_BUCKETS = 24
 
-/** Fade tail length as a fraction of the loop. */
-export const FADE_FRACTION = 0.3
+/** Fade tail length as a fraction of the loop. A whole loop: the oldest line fades out just as the tip returns to it. */
+export const FADE_FRACTION = 1
+
+/** Opacity of connecting jumps relative to the drawing around them. */
+export const JUMP_ALPHA = 0.25
 
 /** Smallest power of 2 >= n (and >= 2), the resolution reconstruct needs. */
 export function trailSize(n: number): number {
@@ -27,13 +30,18 @@ export function resampleJump(jump: Uint8Array, n: number): Uint8Array {
   return out
 }
 
+/** Discards everything; trace into it to draw only the other kind of link. */
+export const NO_SINK: PathSink = { moveTo() {}, lineTo() {} }
+
 /**
- * Adds count consecutive trail points starting at index start (wrapping modulo xs.length) to sink,
- * in screen space (ox + x * s, oy + y * s). Points with jump[i] = 1 are skipped and break the line.
- * Returns whether the pen is down at the end, i.e. the last point was drawn.
+ * Adds count consecutive trail points starting at index start (wrapping modulo xs.length),
+ * in screen space (ox + x * s, oy + y * s). Each link between neighbouring points goes to
+ * `jumps` when either end has jump[i] = 1, else to `main`. When tipX/tipY are given, one
+ * more link runs from the last point to the tip, classed like the last point.
  */
 export function traceTrail(
-  sink: PathSink,
+  main: PathSink,
+  jumps: PathSink,
   xs: Float64Array,
   ys: Float64Array,
   jump: Uint8Array | null,
@@ -42,24 +50,47 @@ export function traceTrail(
   ox: number,
   oy: number,
   s: number,
-): boolean {
+  tipX = Number.NaN,
+  tipY = Number.NaN,
+): void {
   const n = xs.length
-  if (n === 0 || count <= 0) return false
+  if (n === 0 || count <= 0) return
+  const withTip = Number.isFinite(tipX) && Number.isFinite(tipY)
   let i = ((start % n) + n) % n
-  let pen = false
-  for (let c = 0; c < count; c++) {
-    if (jump !== null && jump[i] === 1) {
-      pen = false
+  let px = ox + xs[i] * s
+  let py = oy + ys[i] * s
+  let pj = jump !== null && jump[i] === 1
+  // Index of the point each pen rests on, so consecutive links stay one subpath.
+  let mainAt = -1
+  let jumpAt = -1
+  const links = withTip ? count : count - 1
+  for (let c = 1; c <= links; c++) {
+    let x: number
+    let y: number
+    let fj: boolean
+    if (c < count) {
+      if (++i === n) i = 0
+      x = ox + xs[i] * s
+      y = oy + ys[i] * s
+      fj = jump !== null && jump[i] === 1
     } else {
-      const x = ox + xs[i] * s
-      const y = oy + ys[i] * s
-      if (pen) sink.lineTo(x, y)
-      else sink.moveTo(x, y)
-      pen = true
+      x = tipX
+      y = tipY
+      fj = pj
     }
-    if (++i === n) i = 0
+    if (pj || fj) {
+      if (jumpAt !== c - 1) jumps.moveTo(px, py)
+      jumps.lineTo(x, y)
+      jumpAt = c
+    } else {
+      if (mainAt !== c - 1) main.moveTo(px, py)
+      main.lineTo(x, y)
+      mainAt = c
+    }
+    px = x
+    py = y
+    pj = fj
   }
-  return pen
 }
 
 /** Tail length in points for a loop of n points. */
@@ -76,7 +107,7 @@ export function bucketStart(b: number, buckets: number, len: number): number {
   return Math.floor((b * (len - 1)) / buckets)
 }
 
-/** Alpha of bucket b; the oldest bucket (0) is faintest, the newest is opaque. */
+/** Alpha of bucket b; the oldest bucket (0) is faintest, the newest is opaque. Eased so most of the tail stays readable. */
 export function bucketAlpha(b: number, buckets: number): number {
-  return (b + 1) / buckets
+  return ((b + 1) / buckets) ** 1.6
 }

@@ -26,6 +26,7 @@ import {
   result,
   running,
   samPoints,
+  showFormula,
   showStrokes,
   source,
   time,
@@ -160,9 +161,35 @@ export function Stage() {
           onClick={onOverlayClick}
         />
         {empty ? <DropZone dragging={dragging.value} /> : <StageStatus />}
+        {!empty && !editing && hasDrawing.value && showFormula.value && <Formula />}
         {!empty && dragging.value && <div class="fd-drop-hint cn-engaged cn-r-card" aria-hidden="true" />}
       </div>
       <Transport />
+    </div>
+  )
+}
+
+// The series the circles draw, and how each coefficient comes from the path (as in the
+// 3Blue1Brown video). Static markup, so innerHTML carries no user input.
+const SERIES =
+  '<math display="block"><mi>f</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo><mo>=</mo>' +
+  '<munder><mo>∑</mo><mi>n</mi></munder><msub><mi>c</mi><mi>n</mi></msub>' +
+  '<msup><mi>e</mi><mrow><mi>n</mi><mo>·</mo><mn>2</mn><mi>π</mi><mi>i</mi><mi>t</mi></mrow></msup></math>'
+const COEFFICIENT =
+  '<math display="block"><msub><mi>c</mi><mi>n</mi></msub><mo>=</mo>' +
+  '<msubsup><mo>∫</mo><mn>0</mn><mn>1</mn></msubsup><mi>f</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo>' +
+  '<msup><mi>e</mi><mrow><mo>−</mo><mi>n</mi><mo>·</mo><mn>2</mn><mi>π</mi><mi>i</mi><mi>t</mi></mrow></msup>' +
+  '<mspace width="0.2em"/><mi>d</mi><mi>t</mi></math>'
+
+function Formula() {
+  const k = Math.min(render.circles.value, result.value?.coeffs.n ?? 0)
+  return (
+    <div class="fd-formula cn-r-card" aria-label="Fourier series formula">
+      <div dangerouslySetInnerHTML={{ __html: SERIES }} />
+      <div dangerouslySetInnerHTML={{ __html: COEFFICIENT }} />
+      <span class="cn-meta">
+        {k} {k === 1 ? 'circle' : 'circles'}, largest |c<sub>n</sub>| first
+      </span>
     </div>
   )
 }

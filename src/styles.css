@@ -9,7 +9,7 @@
    arrives. The design system is dark only. */
 :root {
   --fd-bg: var(--base, #1e1e2e);
-  --fd-trail: var(--yellow, #f9e2af);
+  --fd-trail: var(--mauve, #cba6f7);
   --fd-circle: var(--surface-2, #585b70);
   --fd-arrow: var(--subtext-0, #a6adc8);
   --fd-stroke: var(--teal, #94e2d5);
@@ -54,6 +54,25 @@
 }
 
 .fd-overlay { pointer-events: none; }
+
+/* The Fourier series, bottom-left over the animation. */
+.fd-formula {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: color-mix(in srgb, var(--mantle) 80%, transparent);
+  color: var(--text);
+  font-size: 1.05rem;
+  pointer-events: none;
+}
+.fd-formula math { margin: 0; text-align: left; }
+
+@media (max-width: 760px) {
+  .fd-formula { font-size: 0.85rem; }
+}
 .fd-overlay.is-editing { pointer-events: auto; cursor: crosshair; }
 
 .fd-dropzone {

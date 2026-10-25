@@ -7,68 +7,82 @@ function path(xy: number[], jump: number[]): SinglePath {
   return { points: Float32Array.from(xy), jump: Uint8Array.from(jump) }
 }
 
+/** d of the line path (the one without stroke-opacity). */
 function dOf(svg: string): string | null {
-  const m = /<path d="([^"]*)"/.exec(svg)
+  const m = /<path d="([^"]*)"[^>]*stroke-linejoin="round"\/>/.exec(svg)
+  return m ? m[1] : null
+}
+
+/** d of the fainter jump path. */
+function jumpsOf(svg: string): string | null {
+  const m = /<path d="([^"]*)"[^>]*stroke-opacity="[^"]+"\/>/.exec(svg)
   return m ? m[1] : null
 }
 
 describe('pathToSvg', () => {
   it('shifts coordinates by the pixel-center offset', () => {
     const p = path([0, 0, 4, 0], [0, 0])
-    expect(dOf(pathToSvg(p, 10, 10, false, 0.5))).toBe('M0.5 0.5L4.5 0.5Z')
+    expect(dOf(pathToSvg(p, 10, 10, 0.5))).toBe('M0.5 0.5L4.5 0.5Z')
   })
 
   // Square with the second side (1 -> 2) a connecting jump.
   const square = path([0, 0, 10, 0, 10, 10, 0, 10], [0, 1, 0, 0])
 
   it('produces a pixel-space SVG document with stroke only', () => {
-    const svg = pathToSvg(square, 640, 480, false)
+    const svg = pathToSvg(square, 640, 480)
     expect(svg.startsWith('<?xml')).toBe(true)
     expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"')
     expect(svg).toContain('viewBox="0 0 640 480"')
     expect(svg).toContain('width="640"')
     expect(svg).toContain('fill="none"')
-    expect(svg).toMatch(/stroke="[^"]+"/)
     expect(svg.trim().endsWith('</svg>')).toBe(true)
-    expect(svg.match(/<path /g)).toHaveLength(1)
+    expect(svg.match(/<path /g)).toHaveLength(2)
   })
 
-  it('keeps one closed subpath when jumps are shown', () => {
-    expect(dOf(pathToSvg(square, 20, 20, false))).toBe('M0 0L10 0L10 10L0 10Z')
+  it('puts jumps in a fainter path drawn under the line', () => {
+    const svg = pathToSvg(square, 20, 20)
+    expect(dOf(svg)).toBe('M0 0L10 0M10 10L0 10L0 0')
+    expect(jumpsOf(svg)).toBe('M10 0L10 10')
+    expect(svg.indexOf('stroke-opacity')).toBeLessThan(svg.indexOf(`d="${dOf(svg)}"`))
   })
 
-  it('splits into subpaths at jumps when hidden', () => {
-    // Remaining segments: 0->1, then 2->3->0 as one run.
-    expect(dOf(pathToSvg(square, 20, 20, true))).toBe('M0 0L10 0M10 10L0 10L0 0')
+  it('closes with Z and has no jump path when there are no jumps', () => {
+    const svg = pathToSvg(path([0, 0, 10, 0, 10, 10], [0, 0, 0]), 20, 20)
+    expect(dOf(svg)).toBe('M0 0L10 0L10 10Z')
+    expect(jumpsOf(svg)).toBeNull()
   })
 
-  it('omits the closing segment when it is a jump', () => {
+  it('draws a closing jump in the jump path', () => {
     const p = path([0, 0, 5, 0, 5, 5], [0, 0, 1])
-    expect(dOf(pathToSvg(p, 10, 10, true))).toBe('M0 0L5 0L5 5')
-    expect(dOf(pathToSvg(p, 10, 10, false))).toBe('M0 0L5 0L5 5Z')
+    const svg = pathToSvg(p, 10, 10)
+    expect(dOf(svg)).toBe('M0 0L5 0L5 5')
+    expect(jumpsOf(svg)).toBe('M5 5L0 0')
   })
 
   it('handles several separate strokes', () => {
     const p = path([0, 0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0], [0, 1, 0, 1, 0, 1])
-    expect(dOf(pathToSvg(p, 10, 10, true))).toBe('M0 0L1 0M2 0L3 0M4 0L5 0')
+    const svg = pathToSvg(p, 10, 10)
+    expect(dOf(svg)).toBe('M0 0L1 0M2 0L3 0M4 0L5 0')
+    expect(jumpsOf(svg)).toBe('M1 0L2 0M3 0L4 0M5 0L0 0')
   })
 
-  it('emits no path when every segment is a jump', () => {
-    const p = path([0, 0, 1, 1], [1, 1])
-    expect(dOf(pathToSvg(p, 10, 10, true))).toBeNull()
+  it('emits only a jump path when every segment is a jump', () => {
+    const svg = pathToSvg(path([0, 0, 1, 1], [1, 1]), 10, 10)
+    expect(dOf(svg)).toBeNull()
+    expect(jumpsOf(svg)).toBe('M0 0L1 1L0 0')
   })
 
   it('rounds coordinates to 2 decimals', () => {
     const p = path([1.23456, 2.0, 3.999, -0.001], [0, 0])
-    expect(dOf(pathToSvg(p, 10.5, 10, false))).toBe('M1.23 2L4 0Z')
-    expect(pathToSvg(p, 10.5, 10, false)).toContain('viewBox="0 0 10.5 10"')
+    expect(dOf(pathToSvg(p, 10.5, 10))).toBe('M1.23 2L4 0Z')
+    expect(pathToSvg(p, 10.5, 10)).toContain('viewBox="0 0 10.5 10"')
   })
 
   it('handles empty and single-point paths', () => {
-    const empty = pathToSvg(path([], []), 100, 50, true)
+    const empty = pathToSvg(path([], []), 100, 50)
     expect(empty).toContain('viewBox="0 0 100 50"')
-    expect(dOf(empty)).toBeNull()
-    expect(dOf(pathToSvg(path([3, 4], [0]), 10, 10, false))).toBeNull()
+    expect(empty).not.toContain('<path')
+    expect(pathToSvg(path([3, 4], [0]), 10, 10)).not.toContain('<path')
   })
 
   it('splits a long path into one subpath per stroke', () => {
@@ -79,7 +93,7 @@ describe('pathToSvg', () => {
       xy.push(100 + 50 * Math.cos(i), 100 + 50 * Math.sin(i))
       jump.push(i % 50 === 49 ? 1 : 0)
     }
-    const d = dOf(pathToSvg(path(xy, jump), 200, 200, true))
+    const d = dOf(pathToSvg(path(xy, jump), 200, 200))
     expect(d).toMatch(/^[MLZ0-9. -]+$/)
     expect(d!.match(/M/g)).toHaveLength(10)
   })

@@ -13,7 +13,7 @@ Everything runs in your browser. Photos never leave the device: the models downl
 | Subject | [MODNet](https://github.com/ZHKKKe/MODNet) masks out the background of portraits. For anything else, click the subject and [MobileSAM](https://github.com/ChaoningZhang/MobileSAM) selects it; shift-click cuts a region out. |
 | Lines | [Informative Drawings](https://github.com/carolineec/informative-drawings) redraws the photo as line art, and only the lines inside the mask are kept. The mask outline is added as a silhouette. Canny edges stand in while the model downloads. |
 | Strokes | The lines are thinned to 1px (Zhang-Suen), traced into polylines, and short fragments are dropped. |
-| One line | The strokes are joined into a single closed path: nearest neighbour, then 2-opt and Or-opt, with each stroke free to run either way. The connecting jumps are flagged so they can be hidden. |
+| One line | The strokes are joined into a single closed path: nearest neighbour, then 2-opt and Or-opt, with each stroke free to run either way. The connecting jumps are flagged and drawn fainter. |
 | Circles | The path is resampled to 8192 evenly spaced points (by default) and run through an FFT. Each coefficient is a circle; the biggest go first, and the tip of the chain traces the path. |
 
 SVG uploads skip straight to the "One line" step. Stipple mode replaces the line steps with weighted Voronoi stippling and a TSP tour through the dots.
@@ -22,7 +22,8 @@ SVG uploads skip straight to the "One line" step. Stipple mode replaces the line
 
 - **Detail** sets the line threshold, minimum stroke length and simplification together. Advanced overrides each one.
 - **Circles** goes from 1 up to the sample count (8192 by default) on a log scale. Around 1000 is enough for a face.
-- **Hide connecting lines** skips the jumps between strokes in the trail.
+- **Trail style**: the line fades with age over one loop, like the video, or the finished drawing stays up.
+- **Follow the tip** zooms in on the end of the chain.
 - **Export** saves a PNG of the finished drawing, a WebM of one loop, or the single-line path as SVG (handy for pen plotters).
 
 Paste an image with Ctrl+V or drop it on the page.
@@ -66,6 +67,6 @@ pnpm deploy
 
 - MODNet only knows people. Other subjects need a few clicks.
 - Busy photos give busy drawings. The line-art model draws texture as well as edges, so a detailed background or patterned clothing turns into a lot of short strokes.
-- Some connecting jumps are long, so expect a stray line or two when Hide connecting lines is off.
+- Some connecting jumps are long. They draw at a quarter of the line's opacity, but they still show.
 - WebM recording happens in real time, one full loop.
 - Tested on Chromium with WebGPU on an Intel GPU. Other GPUs and the WebAssembly fallback haven't been tested end to end in a browser.

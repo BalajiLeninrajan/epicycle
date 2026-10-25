@@ -430,7 +430,7 @@ export async function exportAs(kind: ExportKind): Promise<void> {
       blob = await exportPng(r.coeffs, r.sampled, renderer?.options ?? currentRenderOptions(), PNG_SIZE)
       ext = 'png'
     } else if (kind === 'svg') {
-      const svg = pathToSvg(r.path, r.width, r.height, render.hideJumps.peek(), source.peek() === 'image' ? 0.5 : 0)
+      const svg = pathToSvg(r.path, r.width, r.height, source.peek() === 'image' ? 0.5 : 0)
       blob = new Blob([svg], { type: 'image/svg+xml' })
       ext = 'svg'
     } else {

@@ -30,6 +30,7 @@ import {
   running,
   samPoints,
   settings,
+  showFormula,
   showStrokes,
   source,
   time,
@@ -63,7 +64,6 @@ export function Panel() {
           {isImage && <ModelStatus />}
           {isImage && <SubjectSection />}
           {isImage && <LinesSection />}
-          <PathSection />
           <AnimationSection />
           <ExportSection />
           <Advanced isImage={isImage} />
@@ -334,20 +334,6 @@ function UsedStyleNote() {
   )
 }
 
-// ── Path ──────────────────────────────────────────────────────────────────
-
-function PathSection() {
-  return (
-    <Section title="Path">
-      <Toggle
-        label="Hide connecting lines"
-        checked={render.hideJumps.value}
-        onChange={(v) => (render.hideJumps.value = v)}
-      />
-    </Section>
-  )
-}
-
 // ── Animation ─────────────────────────────────────────────────────────────
 
 const DURATION_MIN = 3
@@ -358,6 +344,8 @@ function AnimationSection() {
     <Section title="Animation">
       <CirclesSlider />
       <DurationSlider />
+      <Toggle label="Follow the tip" checked={render.followTip.value} onChange={(v) => (render.followTip.value = v)} />
+      {render.followTip.value && <ZoomSlider />}
     </Section>
   )
 }
@@ -584,6 +572,7 @@ function AdvancedAnimation() {
       <Toggle label="Show circles" checked={render.showCircles.value} onChange={(v) => (render.showCircles.value = v)} />
       <Toggle label="Show arrows" checked={render.showArrows.value} onChange={(v) => (render.showArrows.value = v)} />
       <Toggle label="Show trail" checked={render.showTrail.value} onChange={(v) => (render.showTrail.value = v)} />
+      <Toggle label="Show formula" checked={showFormula.value} onChange={(v) => (showFormula.value = v)} />
       <Segmented<'full' | 'fade'>
         label="Trail style"
         options={[
@@ -594,8 +583,6 @@ function AdvancedAnimation() {
         disabled={!render.showTrail.value}
         onChange={(v) => (render.trailMode.value = v)}
       />
-      <Toggle label="Follow the tip" checked={render.followTip.value} onChange={(v) => (render.followTip.value = v)} />
-      <ZoomSlider />
       <LineWidthSlider />
     </Group>
   )

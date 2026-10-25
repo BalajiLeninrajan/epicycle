@@ -31,67 +31,55 @@ function line(n: number): { xs: Float64Array; ys: Float64Array } {
 }
 
 describe('traceTrail', () => {
+  const trace = (xs: Float64Array, ys: Float64Array, jump: Uint8Array | null, start: number, count: number, tip?: [number, number]) => {
+    const main = new Recorder()
+    const jumps = new Recorder()
+    traceTrail(main, jumps, xs, ys, jump, start, count, 0, 0, 1, tip?.[0], tip?.[1])
+    return { main: main.ops, jumps: jumps.ops }
+  }
+
   it('draws one connected run without jumps', () => {
     const { xs, ys } = line(4)
-    const r = new Recorder()
-    expect(traceTrail(r, xs, ys, null, 0, 4, 0, 0, 1)).toBe(true)
-    expect(r.ops).toEqual(['M0,0', 'L1,-1', 'L2,-2', 'L3,-3'])
+    expect(trace(xs, ys, null, 0, 4)).toEqual({ main: ['M0,0', 'L1,-1', 'L2,-2', 'L3,-3'], jumps: [] })
   })
 
   it('applies the screen transform', () => {
     const { xs, ys } = line(2)
     const r = new Recorder()
-    traceTrail(r, xs, ys, null, 0, 2, 10, 20, 3)
+    traceTrail(r, r, xs, ys, null, 0, 2, 10, 20, 3)
     expect(r.ops).toEqual(['M10,20', 'L13,17'])
   })
 
-  it('breaks the line at jump samples', () => {
+  it('sends links touching a jump sample to the jump sink', () => {
     const { xs, ys } = line(6)
-    const jump = Uint8Array.from([0, 0, 1, 1, 0, 0])
-    const r = new Recorder()
-    expect(traceTrail(r, xs, ys, jump, 0, 6, 0, 0, 1)).toBe(true)
-    expect(r.ops).toEqual(['M0,0', 'L1,-1', 'M4,-4', 'L5,-5'])
+    const out = trace(xs, ys, Uint8Array.from([0, 0, 1, 1, 0, 0]), 0, 6)
+    expect(out.main).toEqual(['M0,0', 'L1,-1', 'M4,-4', 'L5,-5'])
+    expect(out.jumps).toEqual(['M1,-1', 'L2,-2', 'L3,-3', 'L4,-4'])
   })
 
-  it('ignores jump flags when jump is null', () => {
+  it('appends the tip, classed like the last point', () => {
     const { xs, ys } = line(3)
-    const r = new Recorder()
-    traceTrail(r, xs, ys, null, 0, 3, 0, 0, 1)
-    expect(r.ops.filter((o) => o.startsWith('M'))).toHaveLength(1)
-  })
-
-  it('reports pen up when the last point is a jump', () => {
-    const { xs, ys } = line(3)
-    const r = new Recorder()
-    expect(traceTrail(r, xs, ys, Uint8Array.from([0, 0, 1]), 0, 3, 0, 0, 1)).toBe(false)
+    expect(trace(xs, ys, null, 0, 3, [9, 9]).main.at(-1)).toBe('L9,9')
+    const out = trace(xs, ys, Uint8Array.from([0, 0, 1]), 0, 3, [9, 9])
+    expect(out.jumps.at(-1)).toBe('L9,9')
+    expect(out.main).toEqual(['M0,0', 'L1,-1'])
   })
 
   it('wraps past the end, including negative starts', () => {
     const { xs, ys } = line(4)
-    const r = new Recorder()
-    traceTrail(r, xs, ys, null, -1, 3, 0, 0, 1)
-    expect(r.ops).toEqual(['M3,-3', 'L0,0', 'L1,-1'])
+    expect(trace(xs, ys, null, -1, 3).main).toEqual(['M3,-3', 'L0,0', 'L1,-1'])
   })
 
   it('closes the loop with count = n + 1', () => {
     const { xs, ys } = line(3)
-    const r = new Recorder()
-    traceTrail(r, xs, ys, null, 0, 4, 0, 0, 1)
-    expect(r.ops).toEqual(['M0,0', 'L1,-1', 'L2,-2', 'L0,0'])
+    expect(trace(xs, ys, null, 0, 4).main).toEqual(['M0,0', 'L1,-1', 'L2,-2', 'L0,0'])
   })
 
-  it('handles empty input and zero count', () => {
-    const r = new Recorder()
-    expect(traceTrail(r, new Float64Array(0), new Float64Array(0), null, 0, 5, 0, 0, 1)).toBe(false)
+  it('draws nothing for empty input, zero count or a single point', () => {
+    expect(trace(new Float64Array(0), new Float64Array(0), null, 0, 5)).toEqual({ main: [], jumps: [] })
     const { xs, ys } = line(3)
-    expect(traceTrail(r, xs, ys, null, 0, 0, 0, 0, 1)).toBe(false)
-    expect(r.ops).toEqual([])
-  })
-
-  it('a single point is only a moveTo', () => {
-    const r = new Recorder()
-    traceTrail(r, Float64Array.of(1), Float64Array.of(2), null, 0, 1, 0, 0, 1)
-    expect(r.ops).toEqual(['M1,2'])
+    expect(trace(xs, ys, null, 0, 0)).toEqual({ main: [], jumps: [] })
+    expect(trace(Float64Array.of(1), Float64Array.of(2), null, 0, 1)).toEqual({ main: [], jumps: [] })
   })
 })
 
@@ -118,7 +106,7 @@ describe('fade buckets', () => {
 
   it('tail length stays within [2, n]', () => {
     expect(fadeLength(2)).toBe(2)
-    expect(fadeLength(4096)).toBe(Math.round(4096 * 0.3))
+    expect(fadeLength(4096)).toBe(4096)
     expect(fadeLength(1)).toBe(1)
   })
 })
