@@ -51,7 +51,7 @@ function loadModel(id: ModelId): Promise<void> {
     last = progress
     report(id, { status: 'loading', progress })
   }
-  p = loaders[id](onProgress).then(
+  p = Promise.resolve().then(() => loaders[id](onProgress)).then(
     (backend) => report(id, { status: 'ready', backend }),
     (err: unknown) => {
       delete loading[id]

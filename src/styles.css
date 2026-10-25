@@ -1,6 +1,6 @@
-/* catppuccin-neu from its pinned tag, plus the fonts it expects. Both hosts send
-   Cross-Origin-Resource-Policy: cross-origin, so they load under COEP require-corp. */
-@import url("https://cdn.jsdelivr.net/gh/BalajiLeninrajan/catppuccin-neu@v0.4.1/css/index.css");
+/* catppuccin-neu is bundled from the pinned package; the fonts it expects come from
+   Google Fonts, which sends Cross-Origin-Resource-Policy: cross-origin for COEP. */
+@import "catppuccin-neu/css/index.css";
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=JetBrains+Mono:wght@100..800&display=swap");
 
 /* Canvas colors, read from computed style by the renderer, the PNG export and the

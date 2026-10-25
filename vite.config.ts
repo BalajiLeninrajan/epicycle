@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config'
+import { defaultClientConditions } from 'vite'
 import preact from '@preact/preset-vite'
 
 // COOP/COEP make the page cross-origin isolated, which multithreaded WASM
@@ -10,9 +11,14 @@ const isolation = {
 
 export default defineConfig({
   plugins: [preact()],
+  // ORT's wasm runtime (~27MB) is over the 25 MiB Workers static asset limit, so don't
+  // emit it; src/ml/backend.ts loads it from jsDelivr instead.
+  resolve: { conditions: ['onnxruntime-web-use-extern-wasm', ...defaultClientConditions] },
   server: { headers: isolation },
   preview: { headers: isolation },
   worker: { format: 'es' },
+  // lightningcss rejects catppuccin-neu's ::picker(select):popover-open selector.
+  build: { cssMinify: 'esbuild' },
   optimizeDeps: { exclude: ['onnxruntime-web', '@huggingface/transformers'] },
   test: { environment: 'node', include: ['src/**/*.test.ts'] },
 })
