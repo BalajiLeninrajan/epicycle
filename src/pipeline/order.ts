@@ -442,6 +442,9 @@ function improve(
   const tmp = new Int32Array(K)
   const d2s = new Float64Array(K)
   for (let i = 0; i < n; i++) {
+    // The neighbor lists alone can outlast the budget on clustered input (grid cells are
+    // sized from the bounding box); give up on improving rather than overrun.
+    if ((i & 255) === 255 && performance.now() > deadline) return
     knn(grid, xs, ys, owner, i, k, tmp, 0, d2s)
     const base = ids[i] * K
     for (let j = 0; j < k; j++) nbr[base + j] = tmp[j] < 0 ? -1 : ids[tmp[j]]

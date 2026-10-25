@@ -201,3 +201,22 @@ describe('orderStrokes', () => {
     expect(performance.now() - t0).toBeLessThan(2000)
   })
 })
+
+describe('orderStrokes time budget', () => {
+  it('stays near the budget on tightly clustered input', () => {
+    const strokes: Float32Array[] = []
+    for (const cx of [0, 5000]) {
+      for (let i = 0; i < 6000; i++) {
+        const x = cx + (i % 77) * 0.13
+        const y = Math.floor(i / 77) * 0.13
+        strokes.push(Float32Array.from([x, y, x + 0.05, y + 0.05]))
+      }
+    }
+    const t0 = performance.now()
+    const path = orderStrokes(strokes, { timeBudgetMs: 20 })
+    const ms = performance.now() - t0
+    expect(path.jump.length).toBe(24000)
+    // Nearest neighbor construction is outside the budget; the improve phase must not add seconds.
+    expect(ms).toBeLessThan(1500)
+  })
+})

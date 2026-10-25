@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePathData, parseViewBox, splitSubpaths } from './svg'
+import { parsePathData, parseViewBox, splitSubpaths, isHidden } from './svg'
 
 describe('parsePathData', () => {
   it('expands implicit linetos after a moveto', () => {
@@ -78,5 +78,19 @@ describe('parseViewBox', () => {
     expect(parseViewBox('0 0 0 10')).toBeNull()
     expect(parseViewBox('0 0 10')).toBeNull()
     expect(parseViewBox('a b c d')).toBeNull()
+  })
+})
+
+describe('isHidden', () => {
+  const el = (attrs: Record<string, string>) => ({ getAttribute: (n: string) => attrs[n] ?? null }) as unknown as Element
+  it('reads display and visibility from attributes and inline style', () => {
+    expect(isHidden(el({ display: 'none' }))).toBe(true)
+    expect(isHidden(el({ visibility: 'hidden' }))).toBe(true)
+    expect(isHidden(el({ style: 'display:none' }))).toBe(true)
+    expect(isHidden(el({ style: 'fill:red; visibility: hidden' }))).toBe(true)
+  })
+  it('keeps visible elements', () => {
+    expect(isHidden(el({}))).toBe(false)
+    expect(isHidden(el({ style: 'display:inline;stroke-display:none' }))).toBe(false)
   })
 })

@@ -1,8 +1,12 @@
 import type { Polyline } from './types'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
-/** Target sample spacing in root user units. */
+/** Largest sample spacing in root user units, for drawings without a usable size. */
 const SPACING = 1
+/** Samples per drawing diagonal, so small viewBoxes (24x24 icons) still get smooth curves. */
+const SAMPLES_PER_DIAG = 2000
+/** <use> may reference another <use>; this bounds the chain (and breaks cycles). */
+const MAX_USE_DEPTH = 8
 /** Total sample budget; spacing grows past SPACING when the drawing is longer. */
 const MAX_POINTS = 100_000
 
@@ -164,10 +168,44 @@ const ALLOWED: Record<string, string[]> = {
 }
 const CONTAINERS = new Set(['svg', 'g', 'a', 'switch'])
 
-function copySafe(src: Element, shapes: SVGGeometryElement[]): SVGElement | null {
+/** display:none or visibility:hidden, from the attribute or the inline style (Inkscape hides layers that way). */
+export function isHidden(el: Element): boolean {
+  const style = el.getAttribute('style') ?? ''
+  return (
+    el.getAttribute('display')?.trim() === 'none' ||
+    el.getAttribute('visibility')?.trim() === 'hidden' ||
+    /(?:^|;)\s*display\s*:\s*none/i.test(style) ||
+    /(?:^|;)\s*visibility\s*:\s*hidden/i.test(style)
+  )
+}
+
+/** <use href="#id" x y transform>: the referenced element inside a translated group. */
+function copyUse(src: Element, shapes: SVGGeometryElement[], depth: number): SVGElement | null {
+  if (depth >= MAX_USE_DEPTH) return null
+  const href = src.getAttribute('href') ?? src.getAttributeNS('http://www.w3.org/1999/xlink', 'href') ?? ''
+  if (!href.startsWith('#')) return null // external references never load
+  const target = src.ownerDocument.getElementById(href.slice(1))
+  if (!target || target === src) return null
+  const g = document.createElementNS(SVG_NS, 'g')
+  const x = Number(src.getAttribute('x')) || 0
+  const y = Number(src.getAttribute('y')) || 0
+  const transform = [src.getAttribute('transform') ?? '', x || y ? `translate(${x} ${y})` : ''].join(' ').trim()
+  if (transform) g.setAttribute('transform', transform)
+  // A <symbol> is drawn as a group of its children; its own viewBox is ignored.
+  const children = target.localName === 'symbol' ? Array.from(target.children) : [target]
+  for (const child of children) {
+    const c = copySafe(child, shapes, depth + 1)
+    if (c) g.appendChild(c)
+  }
+  return g.childNodes.length > 0 ? g : null
+}
+
+function copySafe(src: Element, shapes: SVGGeometryElement[], depth = 0): SVGElement | null {
   const tag = src.localName
+  if (src.namespaceURI !== SVG_NS || isHidden(src)) return null
+  if (tag === 'use') return copyUse(src, shapes, depth)
   const allowed = ALLOWED[tag]
-  if (!allowed || src.namespaceURI !== SVG_NS) return null
+  if (!allowed) return null
   const el = document.createElementNS(SVG_NS, tag) as SVGElement
   for (const name of allowed) {
     const v = src.getAttribute(name)
@@ -175,7 +213,7 @@ function copySafe(src: Element, shapes: SVGGeometryElement[]): SVGElement | null
   }
   if (CONTAINERS.has(tag)) {
     for (const child of src.children) {
-      const c = copySafe(child, shapes)
+      const c = copySafe(child, shapes, depth)
       if (c) el.appendChild(c)
     }
     return el
@@ -263,7 +301,8 @@ export function svgToStrokes(svgText: string): { strokes: Polyline[]; width: num
       total += len * scale
     }
 
-    const spacing = Math.max(SPACING, total / MAX_POINTS)
+    const diag = vb ? Math.hypot(vb.width, vb.height) : attrW && attrH ? Math.hypot(attrW, attrH) : total
+    const spacing = Math.max(total / MAX_POINTS, Math.min(SPACING, diag / SAMPLES_PER_DIAG))
     const ox = vb?.x ?? 0
     const oy = vb?.y ?? 0
     let minX = Infinity
