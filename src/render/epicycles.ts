@@ -1,7 +1,7 @@
 import { evalChain, reconstruct } from '../fourier/epicycles'
 import type { Coeffs, SampledPath } from '../pipeline/types'
 import { newCamera, stepCamera, viewTransform, type View } from './camera'
-import { readThemeColors, type ThemeColors } from './theme'
+import { mixRgb, parseRgb, readThemeColors, type ThemeColors } from './theme'
 import { FADE_BUCKETS, bucketAlpha, bucketStart, fadeLength, resampleJump, trailSize, traceTrail } from './trail'
 
 export interface RenderOptions {
@@ -68,8 +68,11 @@ export class EpicycleRenderer {
   private raf = 0
   private lastTs = 0
   private dpr = 1
-  private colors: ThemeColors
+  private colors!: ThemeColors // set by refreshColors() in the constructor
   private colorsDirty = true
+  /** Opaque trail color per fade bucket, premixed with the background (see refreshColors). */
+  private fadeColors: string[] = []
+  private dprQuery: MediaQueryList | null = null
   private readonly cam = newCamera()
   private readonly view: View = { ox: 0, oy: 0, s: 1 }
   private camSettled = true
@@ -83,7 +86,8 @@ export class EpicycleRenderer {
     if (ctx === null) throw new Error('EpicycleRenderer: 2D canvas context unavailable')
     this.canvas = canvas
     this.ctx = ctx
-    this.colors = readThemeColors(canvas)
+    this.refreshColors()
+    this.watchDpr()
 
     this.ro = new ResizeObserver(this.onResize)
     try {
@@ -154,6 +158,7 @@ export class EpicycleRenderer {
     this.ro.disconnect()
     document.removeEventListener('visibilitychange', this.onVisibility)
     this.darkQuery?.removeEventListener('change', this.onScheme)
+    this.dprQuery?.removeEventListener('change', this.onDprChange)
     this.finishOnce()
   }
 
@@ -219,6 +224,41 @@ export class EpicycleRenderer {
     this.render(0)
   }
 
+  /**
+   * Translucent bucket strokes would overlap at their shared endpoints and leave brighter
+   * beads along the tail, so each bucket gets an opaque color mixed over the background.
+   */
+  private refreshColors(): void {
+    this.colors = readThemeColors(this.canvas)
+    this.colorsDirty = false
+    const fg = parseRgb(this.ctx, this.colors.trail)
+    const bg = parseRgb(this.ctx, this.colors.bg)
+    this.fadeColors = []
+    for (let b = 0; b < FADE_BUCKETS; b++) {
+      this.fadeColors.push(fg && bg ? mixRgb(fg, bg, bucketAlpha(b, FADE_BUCKETS)) : this.colors.trail)
+    }
+  }
+
+  /**
+   * devicePixelRatio can change without a size change (moving to another monitor, zoom),
+   * which the ResizeObserver doesn't report. A resolution media query fires on that.
+   */
+  private watchDpr(): void {
+    this.dprQuery?.removeEventListener('change', this.onDprChange)
+    this.dprQuery = typeof matchMedia === 'function' ? matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`) : null
+    this.dprQuery?.addEventListener('change', this.onDprChange)
+  }
+
+  private readonly onDprChange = (): void => {
+    if (this.disposed) return
+    this.dpr = window.devicePixelRatio || 1
+    const rect = this.canvas.getBoundingClientRect()
+    this.canvas.width = Math.round(rect.width * this.dpr)
+    this.canvas.height = Math.round(rect.height * this.dpr)
+    this.watchDpr()
+    this.render(0)
+  }
+
   private readonly onVisibility = (): void => {
     if (document.hidden) {
       if (this.raf !== 0) cancelAnimationFrame(this.raf)
@@ -238,10 +278,7 @@ export class EpicycleRenderer {
     const ctx = this.ctx
     const w = this.canvas.width
     const h = this.canvas.height
-    if (this.colorsDirty) {
-      this.colors = readThemeColors(this.canvas)
-      this.colorsDirty = false
-    }
+    if (this.colorsDirty) this.refreshColors()
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.globalAlpha = 1
     ctx.clearRect(0, 0, w, h)
@@ -301,10 +338,9 @@ export class EpicycleRenderer {
       ctx.beginPath()
       const pen = traceTrail(ctx, xs, ys, jump, start + s0, s1 - s0 + 1, ox, oy, s)
       if (pen && b === FADE_BUCKETS - 1 && m < n) ctx.lineTo(tipSx, tipSy)
-      ctx.globalAlpha = bucketAlpha(b, FADE_BUCKETS)
+      ctx.strokeStyle = this.fadeColors[b] ?? this.colors.trail
       ctx.stroke()
     }
-    ctx.globalAlpha = 1
   }
 
   private drawCircles(coeffs: Coeffs, view: View, w: number, h: number): void {

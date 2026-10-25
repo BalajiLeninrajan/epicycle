@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { mixRgb, parseRgb } from './theme'
 import type { SinglePath } from '../pipeline/types'
 import { pathToSvg } from './export'
 
@@ -76,5 +77,35 @@ describe('pathToSvg', () => {
     const d = dOf(pathToSvg(path(xy, jump), 200, 200, true))
     expect(d).toMatch(/^[MLZ0-9. -]+$/)
     expect(d!.match(/M/g)).toHaveLength(10)
+  })
+})
+
+describe('mixRgb', () => {
+  it('premixes a color over the background', () => {
+    expect(mixRgb([255, 0, 0], [0, 0, 255], 0.5)).toBe('rgb(128, 0, 128)')
+    expect(mixRgb([10, 20, 30], [200, 200, 200], 1)).toBe('rgb(10, 20, 30)')
+  })
+})
+
+describe('parseRgb', () => {
+  // Stands in for a canvas context: normalizes like Chrome does.
+  const fake = () => {
+    let v = '#000000'
+    return {
+      get fillStyle(): string {
+        return v
+      },
+      set fillStyle(c: string) {
+        if (/^#[0-9a-f]{6}$/i.test(c) || /^rgba?\(/.test(c)) v = c.toLowerCase()
+        else if (c === '#000') v = '#000000'
+      },
+    }
+  }
+  it('reads hex and rgba', () => {
+    expect(parseRgb(fake(), '#F9E2AF')).toEqual([249, 226, 175])
+    expect(parseRgb(fake(), 'rgba(1, 2, 3, 0.5)')).toEqual([1, 2, 3])
+  })
+  it('returns black for colors the canvas rejects, like the canvas does', () => {
+    expect(parseRgb(fake(), 'not-a-color')).toEqual([0, 0, 0])
   })
 })

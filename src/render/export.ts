@@ -77,18 +77,27 @@ export async function recordWebm(canvas: HTMLCanvasElement, renderer: EpicycleRe
   })
   stopped.catch(() => {})
 
+  // The renderer freezes while the tab is hidden; pause the recorder with it so the video
+  // doesn't get a frozen stretch, and the loop picks up where it stopped.
+  const onVisibility = () => {
+    if (document.hidden && recorder.state === 'recording') recorder.pause()
+    else if (!document.hidden && recorder.state === 'paused') recorder.resume()
+  }
   const prevTime = renderer.time
   const prevPlaying = renderer.options.playing
   try {
     renderer.setOptions({ playing: false })
     renderer.seek(0)
     recorder.start(250)
+    document.addEventListener('visibilitychange', onVisibility)
+    onVisibility()
     await renderer.playOnce()
     // Give the stream a moment to pick up the final frame.
     await new Promise((resolve) => setTimeout(resolve, 150))
     if (recorder.state !== 'inactive') recorder.stop()
     await stopped
   } finally {
+    document.removeEventListener('visibilitychange', onVisibility)
     if (recorder.state !== 'inactive') recorder.stop()
     for (const track of stream.getTracks()) track.stop()
     renderer.seek(prevTime)
