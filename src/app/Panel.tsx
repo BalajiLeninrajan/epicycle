@@ -12,7 +12,7 @@ import {
   undoSamPoint,
 } from './controller'
 import { ChevronIcon, DownloadIcon, LinkIcon } from './icons'
-import { MIN_FADE_FRACTION } from '../render/trail'
+import { MAX_FADE_FRACTION, MIN_FADE_FRACTION } from '../render/trail'
 import { logToInt, logToValue, valueToLog } from './logic'
 import { pickFile } from './Stage'
 import {
@@ -387,7 +387,7 @@ function UsedStyleNote() {
 // ── Animation ─────────────────────────────────────────────────────────────
 
 const DURATION_MIN = 3
-const DURATION_MAX = 120
+const DURATION_MAX = 60
 
 function AnimationSection() {
   return (
@@ -421,9 +421,9 @@ function FadeSlider() {
       label="Fade speed"
       min={0}
       max={1000}
-      value={1000 - valueToLog(f, MIN_FADE_FRACTION, 1)}
+      value={1000 - valueToLog(f, MIN_FADE_FRACTION, MAX_FADE_FRACTION)}
       display={`fades over ${sec < 10 ? sec.toFixed(1) : Math.round(sec)} s`}
-      onInput={(pos) => (render.fadeFraction.value = Math.round(logToValue(1000 - pos, MIN_FADE_FRACTION, 1) * 1000) / 1000)}
+      onInput={(pos) => (render.fadeFraction.value = Math.round(logToValue(1000 - pos, MIN_FADE_FRACTION, MAX_FADE_FRACTION) * 1000) / 1000)}
     />
   )
 }

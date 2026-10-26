@@ -2,7 +2,7 @@ import { evalChain, reconstruct } from '../fourier/epicycles'
 import type { Coeffs, SampledPath } from '../pipeline/types'
 import { newCamera, stepCamera, viewTransform, type View } from './camera'
 import { mixRgb, parseRgb, readThemeColors, type ThemeColors } from './theme'
-import { FADE_BUCKETS, JUMP_ALPHA, NO_SINK, bucketAlpha, bucketStart, fadeLength, resampleJump, trailSize, traceTrail } from './trail'
+import { FADE_BUCKETS, JUMP_ALPHA, MAX_FADE_FRACTION, NO_SINK, bucketAlpha, bucketStart, fadeLength, resampleJump, trailSize, traceTrail } from './trail'
 
 export interface RenderOptions {
   /** Number of circles K. */
@@ -14,7 +14,7 @@ export interface RenderOptions {
   showTrail: boolean
   /** 'fade': the line fades with age, like 3Blue1Brown's. 'full': the drawing stays. */
   trailMode: 'full' | 'fade'
-  /** In fade mode, the share of a loop it takes the line to fade out (MIN_FADE_FRACTION to 1). */
+  /** In fade mode, how many loops it takes the line to fade out (MIN_FADE_FRACTION to MAX_FADE_FRACTION). */
   fadeFraction: number
   /** Camera follows the tip. */
   followTip: boolean
@@ -76,8 +76,8 @@ export class EpicycleRenderer {
   /** Same, for connecting jumps, which draw at JUMP_ALPHA of the line around them. */
   private fadeJumpColors: string[] = []
   private jumpColor = ''
-  /** True once the tip has gone all the way around, so the trail continues past t = 0. */
-  private looped = false
+  /** Completed loops since the data was set (capped), so the fade tail knows how far back the line exists. */
+  private loops = 0
   private dprQuery: MediaQueryList | null = null
   private readonly cam = newCamera()
   private readonly view: View = { ox: 0, oy: 0, s: 1 }
@@ -111,7 +111,7 @@ export class EpicycleRenderer {
     this.coeffs = coeffs
     this.sampled = sampled
     this.trailJump = resampleJump(sampled.jump, trailSize(sampled.re.length))
-    this.looped = false
+    this.loops = 0
     this.k = -1
     this.updateTrail()
     this.requestDraw()
@@ -150,7 +150,7 @@ export class EpicycleRenderer {
   playOnce(): Promise<void> {
     this.finishOnce()
     this.t = 0
-    this.looped = false
+    this.loops = 0
     this.lastTs = 0
     this.opts = { ...this.opts, playing: true }
     const done = new Promise<void>((resolve) => (this.onceDone = resolve))
@@ -208,7 +208,7 @@ export class EpicycleRenderer {
           this.opts = { ...this.opts, playing: false }
         } else {
           this.t -= Math.floor(this.t)
-          this.looped = true
+          this.loops = Math.min(this.loops + 1, MAX_FADE_FRACTION + 1)
         }
       }
     }
@@ -332,16 +332,17 @@ export class EpicycleRenderer {
 
     if (this.opts.trailMode === 'full') {
       // After the first loop the whole drawing stays up.
-      if (this.looped) this.strokeRun(view, 0, n + 1, Number.NaN, Number.NaN, this.colors.trail, this.jumpColor)
+      if (this.loops > 0) this.strokeRun(view, 0, n + 1, Number.NaN, Number.NaN, this.colors.trail, this.jumpColor)
       else this.strokeRun(view, 0, m + 1, tipX, tipY, this.colors.trail, this.jumpColor)
       return
     }
 
-    // One loop of tail ending at the tip, split into buckets by age. Before the first wrap,
-    // points from before t = 0 haven't been drawn yet and are skipped.
+    // The tail ending at the tip, split into buckets by age. It can be longer than a loop, in
+    // which case it wraps over itself and newer passes are drawn on top. Points from before the
+    // drawing started haven't been drawn yet and are skipped.
     const len = fadeLength(n, this.opts.fadeFraction)
     const start = m - len + 1
-    const first = this.looped ? 0 : -start
+    const first = Math.max(0, len - 1 - (this.loops * n + m))
     for (let b = 0; b < FADE_BUCKETS; b++) {
       const last = b === FADE_BUCKETS - 1
       const s0 = Math.max(bucketStart(b, FADE_BUCKETS, len), first)
