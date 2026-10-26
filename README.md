@@ -1,5 +1,6 @@
 # epicycle
 
+[![CI](https://github.com/BalajiLeninrajan/epicycle/actions/workflows/ci.yml/badge.svg)](https://github.com/BalajiLeninrajan/epicycle/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/BalajiLeninrajan/epicycle/blob/main/LICENSE)
 
 `epicycle` turns any image into one continuous line, then draws that line with a chain of spinning circles, like the drawings in 3Blue1Brown's [But what is a Fourier series?](https://www.youtube.com/watch?v=r6sGWTCMz2k).

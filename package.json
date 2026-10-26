@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "vite",
     "build": "pnpm typecheck && vite build",
@@ -10,7 +11,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p server",
     "test": "vitest run",
     "deploy": "pnpm build && wrangler deploy",
-    "dev:worker": "vite build && wrangler dev"
+    "dev:worker": "vite build && wrangler dev",
+    "ci": "pnpm typecheck && vitest run && vite build"
   },
   "dependencies": {
     "@preact/signals": "^2.11.3",
