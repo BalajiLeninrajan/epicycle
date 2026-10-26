@@ -59,6 +59,10 @@ function api(): Remote<PipelineApi> {
   pipeline ??= getPipeline()
   if (!subscribed) {
     subscribed = true
+    // ?backend=wasm runs every model on WebAssembly, to test the path browsers without WebGPU take.
+    // Comlink keeps call order, so this lands before any model load.
+    const forced = new URLSearchParams(location.search).get('backend')
+    if (forced === 'wasm' || forced === 'webgpu') void pipeline.forceBackend(forced)
     void pipeline.onModelState(proxy(onModelState))
   }
   return pipeline

@@ -1,6 +1,6 @@
 // Pipeline worker entry. Exposes PipelineApi with Comlink.
 import { expose } from 'comlink'
-import type { Backend } from '../ml/backend'
+import { type Backend, forceBackend } from '../ml/backend'
 import { lineArt, loadLineArt, resetLineArt } from '../ml/lineart'
 import { loadSam, samPredict, samSetImage } from '../ml/sam'
 import { loadSegmenter, resetSegmenter, segment } from '../ml/segment'
@@ -101,6 +101,8 @@ const api: PipelineApi = {
     listener = cb
     for (const id of Object.keys(states) as ModelId[]) void cb(id, states[id])
   },
+
+  forceBackend,
 
   loadModel,
 

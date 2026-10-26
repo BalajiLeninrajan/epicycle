@@ -6,6 +6,8 @@ export interface PipelineApi {
   setImage(bitmap: ImageBitmap): Promise<{ width: number; height: number; cutout: boolean }>
   /** Subscribe to model loading state. Pass the callback wrapped in Comlink.proxy. */
   onModelState(cb: (id: ModelId, state: ModelState) => void): void
+  /** Use this backend instead of detecting one. Call before any model loads (the ?backend=wasm switch). */
+  forceBackend(backend: 'webgpu' | 'wasm'): void
   /** Start loading a model if it is not loaded yet. Resolves when ready. */
   loadModel(id: ModelId): Promise<void>
   /** Replace the SAM clicks. An empty list returns to the automatic mask. Resolves with the mask outline. */

@@ -26,6 +26,11 @@ export function detectBackend(): Promise<Backend> {
   return (backend ??= probe())
 }
 
+/** Skip detection and use this backend. Only affects models that haven't started loading. */
+export function forceBackend(b: Backend): void {
+  backend = Promise.resolve(b)
+}
+
 // Runtime files. The asyncify build is the one the webgpu entry loads; it carries both the
 // WebGPU and the CPU (wasm) execution providers. It is 26,861,777 bytes, over Cloudflare's
 // 25 MiB (26,214,400) per-asset limit, so we can't ship it as a static asset. We load it

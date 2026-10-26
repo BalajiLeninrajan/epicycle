@@ -2,19 +2,19 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/BalajiLeninrajan/epicycle/blob/main/LICENSE)
 
-`epicycle` turns any image into one continuous line, then draws that line with a chain of spinning circles, like the drawings in 3Blue1Brown's [But what is a Fourier series?](https://www.youtube.com/watch?v=r6sGWTCMz2k). Ptolemy was right about something.
+`epicycle` turns any image into one continuous line, then draws that line with a chain of spinning circles, like the drawings in 3Blue1Brown's [But what is a Fourier series?](https://www.youtube.com/watch?v=r6sGWTCMz2k).
 
 Everything runs in your browser. Photos never leave the device: the models download once, get cached, and run on WebGPU, or on WebAssembly when there is no GPU.
 
 ## How an image becomes circles
 
-| Step | What happens |
-| --- | --- |
-| Subject | [MODNet](https://github.com/ZHKKKe/MODNet) masks out the background of portraits. For anything else, click the subject and [MobileSAM](https://github.com/ChaoningZhang/MobileSAM) selects it; shift-click cuts a region out. |
-| Lines | [Informative Drawings](https://github.com/carolineec/informative-drawings) redraws the photo as line art, and only the lines inside the mask are kept. The mask outline is added as a silhouette. Canny edges stand in while the model downloads. |
-| Strokes | The lines are thinned to 1px (Zhang-Suen), traced into polylines, and short fragments are dropped. |
-| One line | The strokes are joined into a single closed path: nearest neighbour, then 2-opt and Or-opt, with each stroke free to run either way. The connecting jumps are flagged and drawn fainter. |
-| Circles | The path is resampled to 8192 evenly spaced points (by default) and run through an FFT. Each coefficient is a circle; the biggest go first, and the tip of the chain traces the path. |
+| Step     | What happens                                                                                                                                                                                                                                      |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Subject  | [MODNet](https://github.com/ZHKKKe/MODNet) masks out the background of portraits. For anything else, click the subject and [MobileSAM](https://github.com/ChaoningZhang/MobileSAM) selects it; shift-click cuts a region out.                     |
+| Lines    | [Informative Drawings](https://github.com/carolineec/informative-drawings) redraws the photo as line art, and only the lines inside the mask are kept. The mask outline is added as a silhouette. Canny edges stand in while the model downloads. |
+| Strokes  | The lines are thinned to 1px (Zhang-Suen), traced into polylines, and short fragments are dropped.                                                                                                                                                |
+| One line | The strokes are joined into a single closed path: nearest neighbour, then 2-opt and Or-opt, with each stroke free to run either way. The connecting jumps are flagged and drawn fainter.                                                          |
+| Circles  | The path is resampled to 8192 evenly spaced points (by default) and run through an FFT. Each coefficient is a circle; the biggest go first, and the tip of the chain traces the path.                                                             |
 
 SVG uploads skip straight to the "One line" step. Stipple mode replaces the line steps with weighted Voronoi stippling and a TSP tour through the dots.
 
@@ -29,21 +29,15 @@ The panel follows what you're doing:
 
 Paste an image with Ctrl+V or drop it on the page.
 
-## Share links
-
-A link carries the single-line path and the animation settings, never the picture. The path goes on a 4095-step grid as delta-encoded varints and gets deflated, so a portrait is about 3 KB.
-
-On the deployed site, **Share link** stores that in Workers KV and gives back a short link like `/s/uyS7Zgp8sV3L`. The id is a hash of the drawing, so sharing the same one twice gives the same link. Without the API (plain `pnpm dev`, or offline), the drawing goes into the URL fragment instead: `/#d=…`, a few thousand characters, with no server involved at all.
-
 ## Models
 
-All three come from Hugging Face on first use and stay in the browser's Cache API. The ONNX Runtime wasm build (27 MB) comes from jsDelivr, since it is over Cloudflare's 25 MiB limit for a static asset.
+All three come from Hugging Face on first use and stay in the browser's Cache API. The ONNX Runtime wasm build (27 MB) comes from jsDelivr.
 
-| Model | Download | Peak memory (CPU) | License |
-| --- | --- | --- | --- |
-| [Informative Drawings, line art](https://huggingface.co/rocca/informative-drawings-line-art-onnx) | 17 MB | ~320 MB | MIT |
-| [MODNet](https://huggingface.co/Xenova/modnet) | 26 MB | ~270 MB | Apache-2.0 |
-| [MobileSAM](https://huggingface.co/Acly/MobileSAM) | 44 MB | ~360 MB | Apache-2.0 (weights), MIT (ONNX export) |
+| Model                                                                                             | Download | Peak memory (CPU) | License                                 |
+| ------------------------------------------------------------------------------------------------- | -------- | ----------------- | --------------------------------------- |
+| [Informative Drawings, line art](https://huggingface.co/rocca/informative-drawings-line-art-onnx) | 17 MB    | ~320 MB           | MIT                                     |
+| [MODNet](https://huggingface.co/Xenova/modnet)                                                    | 26 MB    | ~270 MB           | Apache-2.0                              |
+| [MobileSAM](https://huggingface.co/Acly/MobileSAM)                                                | 44 MB    | ~360 MB           | Apache-2.0 (weights), MIT (ONNX export) |
 
 BiRefNet and SlimSAM were tried first. Both are better on paper, and both got the browser OOM-killed on an 8 GB laptop.
 
@@ -68,20 +62,9 @@ pnpm dev:worker
 
 The dev server sends `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers, which multithreaded WebAssembly needs. Production gets the same headers from `public/_headers`.
 
-## Deploy
-
-A Worker serves the static site and the share API (`server/index.ts`):
-
-```console
-pnpm deploy
-```
-
-The first deploy creates the `SHARES` KV namespace and writes its id back into `wrangler.jsonc`. Link creation is limited to 20 per minute per IP.
-
 ## Limits
 
 - MODNet only knows people. Other subjects need a few clicks.
 - Busy photos give busy drawings. The line-art model draws texture as well as edges, so a detailed background or patterned clothing turns into a lot of short strokes.
 - Some connecting jumps are long. They draw at a quarter of the line's opacity, but they still show.
 - WebM recording happens in real time, one full loop.
-- Tested on Chromium with WebGPU on an Intel GPU. Other GPUs and the WebAssembly fallback haven't been tested end to end in a browser.
