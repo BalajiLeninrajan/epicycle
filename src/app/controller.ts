@@ -1,6 +1,7 @@
 // Glue between the signals, the pipeline worker and the renderer.
 import { batch, effect } from '@preact/signals'
 import { proxy, type Remote } from 'comlink'
+import posthog from 'posthog-js'
 import { svgToStrokes } from '../pipeline/svg'
 import { decodeDrawing, encodeDrawing, fromBase64Url, type SharedDrawing, toBase64Url } from '../share/codec'
 import type { ModelId, PipelineResult, Polyline, SamPoint, SinglePath } from '../pipeline/types'
@@ -53,6 +54,7 @@ onPipelineFailure((message) => {
     running.value = false
     maskBusy.value = false
   })
+  posthog.captureException(new Error(message))
 })
 
 function api(): Remote<PipelineApi> {
@@ -127,6 +129,11 @@ function currentRenderOptions(): RenderOptions {
 function onModelState(id: ModelId, state: (typeof models.value)[ModelId]): void {
   const prev = models.peek()[id]
   models.value = { ...models.peek(), [id]: state }
+  if (state.status === 'ready' && prev.status !== 'ready') {
+    posthog.capture('load_model', { model: id, status: 'ready', backend: state.backend })
+  } else if (state.status === 'error' && prev.status !== 'error') {
+    posthog.capture('load_model', { model: id, status: 'error', message: state.message })
+  }
   if (state.status !== 'ready' || prev.status === 'ready' || source.peek() !== 'image') return
   // A model that just became ready changes the result: AI lines replace Canny, or the auto mask appears.
   if (id === 'lineart' && settings.lineStyle.peek() === 'ai') runner.flush()
@@ -241,6 +248,7 @@ async function openImage(blob: Blob, name: string, seq = ++openSeq): Promise<voi
     maskOutline.value = []
     maskEditing.value = false
   })
+  posthog.capture('open_drawing', { source: 'image', cutout: size.cutout })
   startModels()
   runner.flush()
 }
@@ -264,6 +272,7 @@ function openSvg(text: string, name: string, seq = ++openSeq): void {
     maskOutline.value = []
     maskEditing.value = false
   })
+  posthog.capture('open_drawing', { source: 'svg', strokes: parsed.strokes.length })
   runner.flush()
 }
 
@@ -458,8 +467,15 @@ export async function exportAs(kind: ExportKind): Promise<void> {
       ext = 'webm'
     }
     download(blob, `${sourceName.peek()}-epicycle.${ext}`)
+    posthog.capture('export_drawing', {
+      format: kind,
+      source: source.peek(),
+      line_style: source.peek() === 'image' ? settings.lineStyle.peek() : undefined,
+      circles: Math.min(render.circles.peek(), r.coeffs.n),
+    })
   } catch (err) {
     error.value = `Export failed: ${errorMessage(err)}`
+    posthog.captureException(err, { format: kind })
   } finally {
     exporting.value = null
     const pending = pendingResult
@@ -541,7 +557,7 @@ export async function createShareLink(): Promise<ShareLink> {
   return { url: `${location.origin}/#d=${toBase64Url(bytes)}`, short: false }
 }
 
-function openShared(d: SharedDrawing): void {
+function openShared(d: SharedDrawing, link: 'short' | 'fragment'): void {
   resetForNewSource()
   svgData = null
   sharedData = { path: d.path, width: d.width, height: d.height }
@@ -568,6 +584,7 @@ function openShared(d: SharedDrawing): void {
     render.fadeFraction.value = d.fadeFraction
     showFormula.value = d.showFormula
   })
+  posthog.capture('open_drawing', { source: 'shared', link })
   runner.flush()
 }
 
@@ -590,7 +607,7 @@ export async function openFromLocation(): Promise<void> {
     }
     const drawing = await decodeDrawing(bytes)
     if (seq !== openSeq) return
-    openShared(drawing)
+    openShared(drawing, short ? 'short' : 'fragment')
   } catch (err) {
     if (seq === openSeq) error.value = errorMessage(err)
   }

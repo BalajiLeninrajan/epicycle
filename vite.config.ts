@@ -17,8 +17,12 @@ export default defineConfig({
   server: { headers: isolation },
   preview: { headers: isolation },
   worker: { format: 'es' },
-  // lightningcss rejects catppuccin-neu's ::picker(select):popover-open selector.
-  build: { cssMinify: 'esbuild' },
+  build: {
+    // lightningcss rejects catppuccin-neu's ::picker(select):popover-open selector.
+    cssMinify: 'esbuild',
+    // posthog-js in its own chunk keeps the entry small and stays cached across deploys.
+    rolldownOptions: { output: { codeSplitting: { groups: [{ name: 'posthog', test: /node_modules[\\/]posthog-js/ }] } } },
+  },
   optimizeDeps: { exclude: ['onnxruntime-web'] },
   // Two workers keep test runs light on low-memory machines.
   test: { environment: 'node', include: ['src/**/*.test.ts'], maxWorkers: 2 },
