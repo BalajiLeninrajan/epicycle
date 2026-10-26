@@ -110,6 +110,10 @@ const api: PipelineApi = {
   async runStrokes(strokes, width, height, sampleCount) {
     return pipeline.runStrokes(strokes, width, height, sampleCount)
   },
+
+  async runPath(path, width, height, sampleCount) {
+    return pipeline.runPath(path, width, height, sampleCount)
+  },
 }
 
 expose(api)

@@ -1,4 +1,4 @@
-import type { ModelId, ModelState, PipelineResult, PipelineSettings, Polyline, SamPoint } from '../pipeline/types'
+import type { ModelId, ModelState, PipelineResult, PipelineSettings, Polyline, SamPoint, SinglePath } from '../pipeline/types'
 
 /** RPC surface of the pipeline worker, exposed with Comlink. */
 export interface PipelineApi {
@@ -16,4 +16,6 @@ export interface PipelineApi {
   run(settings: PipelineSettings): Promise<PipelineResult>
   /** Skip image processing and run ordering + Fourier on given strokes (SVG mode). */
   runStrokes(strokes: Polyline[], width: number, height: number, sampleCount: number): Promise<PipelineResult>
+  /** Skip everything up to ordering and run resample + Fourier on a given path (shared drawings). */
+  runPath(path: SinglePath, width: number, height: number, sampleCount: number): Promise<PipelineResult>
 }

@@ -226,7 +226,8 @@ export function unpackDrawing(bytes: Uint8Array): SharedDrawing {
 }
 
 async function pipeThrough(bytes: Uint8Array, stream: CompressionStream | DecompressionStream, limit: number): Promise<Uint8Array> {
-  const out = new Response(new Blob([bytes as BlobPart]).stream().pipeThrough(stream)).body
+  // slice() gives a plain ArrayBuffer-backed copy that every Response typing accepts.
+  const out = new Response(bytes.slice()).body?.pipeThrough(stream)
   if (!out) return new Uint8Array(0)
   const reader = out.getReader()
   const chunks: Uint8Array[] = []

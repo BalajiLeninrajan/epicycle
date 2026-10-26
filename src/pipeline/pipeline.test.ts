@@ -449,3 +449,20 @@ describe('largestComponentArea', () => {
     expect(largestComponentArea({ width: 0, height: 0, data: new Uint8Array(0) })).toBe(0)
   })
 })
+
+describe('runPath', () => {
+  it('keeps the given order and jumps, and transforms the path', () => {
+    const points = Float32Array.from([0, 0, 100, 0, 100, 100, 0, 100])
+    const jump = Uint8Array.from([0, 1, 0, 0])
+    const r = createPipeline(fakeDeps()).runPath({ points, jump }, 120, 120, 2048)
+    expect(r.path.points).toBe(points)
+    expect(r.path.jump).toBe(jump)
+    expect(r.coeffs.n).toBe(2048)
+    expect(r.sampled.jump.some((v) => v === 1)).toBe(true)
+  })
+
+  it('returns an empty result for a degenerate path', () => {
+    const r = createPipeline(fakeDeps()).runPath({ points: Float32Array.from([5, 5]), jump: Uint8Array.from([0]) }, 10, 10, 2048)
+    expect(r.path.points.length).toBe(0)
+  })
+})

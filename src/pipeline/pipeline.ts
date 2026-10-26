@@ -54,6 +54,8 @@ export interface Pipeline {
   run(settings: PipelineSettings): Promise<PipelineResult>
   /** SVG mode: order, resample and transform given strokes. */
   runStrokes(strokes: Polyline[], width: number, height: number, sampleCount: number): PipelineResult
+  /** Shared drawings: the path is already ordered, so only resample and transform it. */
+  runPath(path: SinglePath, width: number, height: number, sampleCount: number): PipelineResult
 }
 
 /** Binarization cutoff for mask probabilities. */
@@ -358,6 +360,15 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
       // SVG input is a one-off, so its cache is thrown away.
       const s = { cache: new Map<string, Cached>(), width: w, height: h }
       return finish(s, n, valid, 'svg', () => orderStrokes(valid), 'ai', false, timings, t0)
+    },
+
+    runPath(path, width, height, sampleCount) {
+      const t0 = now()
+      const timings: Record<string, number> = {}
+      const n = sanitizeSampleCount(sampleCount)
+      const s = { cache: new Map<string, Cached>(), width, height }
+      if (path.points.length < 4 || !allFinite(path.points)) return emptyResult(width, height, n, [], 'ai', false, timings, 0)
+      return finish(s, n, [], 'shared', () => path, 'ai', false, timings, t0)
     },
   }
 }
