@@ -10,8 +10,9 @@
     // Only the share API runs the Worker; everything else is a static asset or the SPA shell.
     "run_worker_first": ["/api/*"]
   },
-  // No id: Wrangler creates the namespace on first deploy (and a local one for wrangler dev).
-  "kv_namespaces": [{ "binding": "SHARES" }],
+  // Created by the first deploy (Wrangler provisions a binding with no id); wrangler dev uses a local copy.
+  "kv_namespaces": [{ "binding": "SHARES", "id": "5463377d991a4c52b0f452629e22a19b" }],
+  "workers_dev": true,
   "ratelimits": [
     {
       "name": "SHARE_LIMIT",
