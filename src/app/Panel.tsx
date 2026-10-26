@@ -18,6 +18,7 @@ import {
   error,
   exporting,
   hasDrawing,
+  imageCutout,
   imageSize,
   maskBusy,
   maskEditing,
@@ -304,6 +305,7 @@ function AutoMaskNote() {
   const seg = models.value.segment
   const res = result.value
   if (samPoints.value.length > 0) return <span class="cn-meta">Using your mask ({samPoints.value.length} clicks).</span>
+  if (imageCutout.value) return <span class="cn-meta">Using the picture's transparency as the mask.</span>
   if (seg.status === 'loading') return <span class="cn-meta">Drawing the whole image until the subject model loads.</span>
   if (seg.status === 'error') return <span class="cn-meta">The subject model failed, so the whole image is drawn.</span>
   // While a run is in flight the shown result may predate the model; wait for the new one.

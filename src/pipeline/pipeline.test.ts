@@ -204,10 +204,11 @@ describe('createPipeline', () => {
     expect(maxD).toBeLessThan(R + 4)
     expectFinite(masked)
 
-    // The silhouette adds the mask boundary as one extra stroke.
+    // The silhouette adds the mask boundary as one extra stroke, and switching it changes
+    // which line pixels near the edge are kept, so the lines are masked again.
     const noSil = await p.run(settings({ keepBackground: false, includeSilhouette: false }))
     expect(masked.strokes.length).toBe(noSil.strokes.length + 1)
-    expect(noSil.timings).not.toHaveProperty('thin')
+    expect(noSil.timings).toHaveProperty('lineMask')
 
     const outline = await p.getMaskOutline()
     expect(outline.length).toBe(1)
@@ -464,5 +465,27 @@ describe('runPath', () => {
   it('returns an empty result for a degenerate path', () => {
     const r = createPipeline(fakeDeps()).runPath({ points: Float32Array.from([5, 5]), jump: Uint8Array.from([0]) }, 10, 10, 2048)
     expect(r.path.points.length).toBe(0)
+  })
+})
+
+describe('cut-out images', () => {
+  it('use the alpha as the mask without calling the segmenter', async () => {
+    const deps = fakeDeps({ segmentProb: diskProb(W, H, CX, CY, 5) })
+    const p = createPipeline(deps)
+    p.setImage(ringAndCross(), diskProb(W, H, CX, CY, 40))
+    const r = await p.run(settings({ keepBackground: false }))
+    expect(r.masked).toBe(true)
+    expect(deps.calls.segment).toBe(0)
+    expect((await p.getMaskOutline()).length).toBeGreaterThan(0)
+  })
+
+  it('give way to SAM clicks and to keeping the background', async () => {
+    const deps = fakeDeps({ samProb: diskProb(W, H, CX, CY, 20) })
+    const p = createPipeline(deps)
+    p.setImage(ringAndCross(), diskProb(W, H, CX, CY, 40))
+    expect((await p.run(settings({ keepBackground: true }))).masked).toBe(false)
+    await p.setSamPoints([{ x: 0.5, y: 0.5, positive: true }])
+    expect(deps.calls.samPredict).toBe(1)
+    expect((await p.run(settings({ keepBackground: false }))).masked).toBe(true)
   })
 })

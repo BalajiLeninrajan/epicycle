@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { gaussianBlur, resizeGray, toGray } from './image'
+import { gaussianBlur, resizeGray, toGray, flattenCutout } from './image'
 import type { GrayImage } from './types'
 
 function gray(width: number, height: number, fn: (x: number, y: number) => number): GrayImage {
@@ -150,5 +150,49 @@ describe('resizeGray', () => {
     expect(resizeGray(gray(4, 4, () => 1), 0, 3).data.length).toBe(0)
     const fromEmpty = resizeGray({ width: 0, height: 0, data: new Float32Array(0) }, 3, 2)
     expect(fromEmpty.data.length).toBe(6)
+  })
+})
+
+describe('flattenCutout', () => {
+  const rgba = (w: number, h: number, px: (x: number, y: number) => [number, number, number, number]) => {
+    const d = new Uint8ClampedArray(w * h * 4)
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) d.set(px(x, y), (y * w + x) * 4)
+    return d
+  }
+
+  it('turns a white logo on transparency into black on white, and returns its alpha', () => {
+    const d = rgba(10, 10, (x) => (x < 5 ? [255, 255, 255, 255] : [0, 0, 0, 0]))
+    const alpha = flattenCutout(d, 10, 10)
+    expect(alpha).not.toBeNull()
+    expect(alpha!.data[0]).toBe(1)
+    expect(alpha!.data[9]).toBe(0)
+    expect(Array.from(d.slice(0, 4))).toEqual([0, 0, 0, 255])
+    expect(Array.from(d.slice(36, 40))).toEqual([255, 255, 255, 255])
+  })
+
+  it('keeps dark artwork as it is', () => {
+    const d = rgba(10, 10, (x) => (x < 5 ? [20, 30, 40, 255] : [0, 0, 0, 0]))
+    flattenCutout(d, 10, 10)
+    expect(Array.from(d.slice(0, 4))).toEqual([20, 30, 40, 255])
+    expect(Array.from(d.slice(36, 40))).toEqual([255, 255, 255, 255])
+  })
+
+  it('leaves opaque images alone', () => {
+    const d = rgba(4, 4, () => [255, 255, 255, 255])
+    expect(flattenCutout(d, 4, 4)).toBeNull()
+    expect(d.every((v) => v === 255)).toBe(true)
+  })
+
+  it('flattens a few soft edges without treating them as a cut-out', () => {
+    const d = rgba(200, 200, (x, y) => [10, 10, 10, x === 0 && y === 0 ? 128 : 255])
+    expect(flattenCutout(d, 200, 200)).toBeNull()
+    expect(d[3]).toBe(255)
+  })
+
+  it('blends partial alpha over white', () => {
+    const d = rgba(2, 1, (x) => (x === 0 ? [0, 0, 0, 128] : [0, 0, 0, 0]))
+    flattenCutout(d, 2, 1)
+    expect(d[0]).toBeGreaterThan(120)
+    expect(d[0]).toBeLessThan(135)
   })
 })

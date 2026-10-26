@@ -3,7 +3,7 @@ import { computeCoeffs } from '../fourier/epicycles'
 import { canny } from './canny'
 import { outerContours, trimImageBorder } from './contour'
 import { toGray } from './image'
-import { and, close, dilate, fillHoles, removeSmallComponents, threshold } from './morph'
+import { and, close, dilate, erode, fillHoles, removeSmallComponents, threshold } from './morph'
 import { orderStrokes } from './order'
 import { deriveParams } from './params'
 import { resample } from './resample'
@@ -45,8 +45,11 @@ export interface PipelineDeps {
 }
 
 export interface Pipeline {
-  /** Replace the source image and drop every cache, including SAM clicks. */
-  setImage(image: ImageData): { width: number; height: number }
+  /**
+   * Replace the source image and drop every cache, including SAM clicks. cutout is the
+   * alpha of a transparent image (see flattenCutout); it stands in for the auto mask.
+   */
+  setImage(image: ImageData, cutout?: GrayImage | null): { width: number; height: number }
   /** Replace the SAM clicks (empty = back to the auto mask). Resolves with the mask outline. */
   setSamPoints(points: SamPoint[]): Promise<Polyline[]>
   /** Outer contours of the SAM mask if there are clicks, else of the auto mask. Empty when there is no mask. */
@@ -64,8 +67,13 @@ const MASK_THRESHOLD = 0.5
 const MASK_CLOSE_FRAC = 0.01
 /** Mask blobs smaller than this fraction of the largest blob are dropped. */
 const MASK_MIN_BLOB_FRAC = 0.01
-/** Line pixels may sit this far (fraction of diagonal, min 2px) outside the mask, so edges on the outline survive. */
-const LINE_MASK_DILATE_FRAC = 0.005
+/**
+ * Band around the mask edge (fraction of diagonal, min 2px). Without the silhouette, line
+ * pixels may sit this far outside the mask so edges on the outline survive. With it, line
+ * pixels this close to the edge are dropped instead: the silhouette already draws that
+ * boundary, and keeping both gives a doubled outline.
+ */
+const LINE_MASK_BAND_FRAC = 0.005
 const STIPPLE_ITERATIONS = 20
 
 interface Cached {
@@ -75,6 +83,7 @@ interface Cached {
 
 interface ImageState {
   image: ImageData
+  cutout: GrayImage | null
   width: number
   height: number
   diag: number
@@ -152,6 +161,10 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
       prob = s.samProb
       key = `sam${s.samVersion}`
       isSam = true
+    } else if (s.samPoints.length === 0 && s.cutout) {
+      // A transparent picture already says what the subject is.
+      prob = s.cutout
+      key = 'cutout'
     } else if (s.samPoints.length === 0) {
       if (!s.autoProbValue && deps.segmenterReady()) {
         try {
@@ -254,11 +267,12 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
     let lines = source
     if (mask) {
       const m = mask
-      const r = Math.max(2, Math.round(LINE_MASK_DILATE_FRAC * s.diag))
-      const dilated = memo(s, 'maskDilate', info.key, timings, () => dilate(m, r))
-      lineKey = `${sourceKey}|${info.key}`
+      const r = Math.max(2, Math.round(LINE_MASK_BAND_FRAC * s.diag))
+      const outline = settings.includeSilhouette
+      const band = memo(s, 'maskBand', `${info.key}|${outline}`, timings, () => (outline ? erode(m, r) : dilate(m, r)))
+      lineKey = `${sourceKey}|${info.key}|${outline}`
       const src = source
-      lines = memo(s, 'lineMask', lineKey, timings, () => and(src, dilated))
+      lines = memo(s, 'lineMask', lineKey, timings, () => and(src, band))
     }
 
     const l = lines
@@ -289,10 +303,11 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
   }
 
   return {
-    setImage(image) {
+    setImage(image, cutout = null) {
       const { width, height } = image
       st = {
         image,
+        cutout,
         width,
         height,
         diag: Math.hypot(width, height),

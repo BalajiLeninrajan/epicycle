@@ -141,3 +141,42 @@ export function resizeGray(img: GrayImage, width: number, height: number): GrayI
   }
   return { width, height, data: out }
 }
+
+/** Share of pixels that must be see-through before transparency counts as a cut-out. */
+const CUTOUT_MIN_CLEAR = 0.01
+/** Visible artwork brighter than this (alpha-weighted mean luma) is inverted when flattened. */
+const LIGHT_ART = 0.6
+
+/**
+ * Prepare an RGBA image with transparency for the pipeline, in place. Every stage expects
+ * dark ink on light paper, so the image is flattened onto white, and artwork that is light
+ * itself (a white logo on a transparent background) is inverted first, or it would vanish
+ * into the paper. Returns the alpha channel in [0, 1] when the image is a cut-out (enough
+ * pixels see-through to define a subject), else null. Opaque images are left untouched.
+ */
+export function flattenCutout(data: Uint8ClampedArray, width: number, height: number): GrayImage | null {
+  const n = width * height
+  let clear = 0
+  let weight = 0
+  let luma = 0
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    const a = data[j + 3]
+    if (a < 250) clear++
+    if (a === 0) continue
+    weight += a
+    luma += a * (0.2126 * data[j] + 0.7152 * data[j + 1] + 0.0722 * data[j + 2])
+  }
+  if (clear === 0) return null
+  const invert = weight > 0 && luma / weight / 255 > LIGHT_ART
+  const alpha = new Float32Array(n)
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    const a = data[j + 3] / 255
+    alpha[i] = a
+    for (let c = 0; c < 3; c++) {
+      const v = invert ? 255 - data[j + c] : data[j + c]
+      data[j + c] = v * a + 255 * (1 - a)
+    }
+    data[j + 3] = 255
+  }
+  return clear / n >= CUTOUT_MIN_CLEAR ? { width, height, data: alpha } : null
+}

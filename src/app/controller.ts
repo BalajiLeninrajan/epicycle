@@ -13,6 +13,7 @@ import {
   error,
   exporting,
   hasDrawing,
+  imageCutout,
   imageSize,
   maskBusy,
   maskEditing,
@@ -209,7 +210,7 @@ async function openImage(blob: Blob, name: string, seq = ++openSeq): Promise<voi
   }
   resetForNewSource()
   // Structured clone: the worker gets its own copy and closes it; ours stays for the mask editor.
-  let size: { width: number; height: number }
+  let size: { width: number; height: number; cutout: boolean }
   try {
     size = await api().setImage(bmp)
   } catch (err) {
@@ -227,7 +228,8 @@ async function openImage(blob: Blob, name: string, seq = ++openSeq): Promise<voi
     const old = preview.peek()
     preview.value = bmp
     old?.close()
-    imageSize.value = size
+    imageSize.value = { width: size.width, height: size.height }
+    imageCutout.value = size.cutout
     sourceName.value = baseName(name)
     source.value = 'image'
     result.value = null
@@ -250,6 +252,7 @@ function openSvg(text: string, name: string, seq = ++openSeq): void {
     preview.peek()?.close()
     preview.value = null
     imageSize.value = { width: parsed.width, height: parsed.height }
+    imageCutout.value = false
     sourceName.value = baseName(name)
     source.value = 'svg'
     result.value = null
@@ -541,6 +544,7 @@ function openShared(d: SharedDrawing): void {
     preview.peek()?.close()
     preview.value = null
     imageSize.value = { width: d.width, height: d.height }
+    imageCutout.value = false
     sourceName.value = 'shared'
     source.value = 'shared'
     result.value = null

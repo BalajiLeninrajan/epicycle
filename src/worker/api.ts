@@ -3,7 +3,7 @@ import type { ModelId, ModelState, PipelineResult, PipelineSettings, Polyline, S
 /** RPC surface of the pipeline worker, exposed with Comlink. */
 export interface PipelineApi {
   /** Store a new source image (downscaled so the long side is at most 1024px). Clears the mask and all caches. */
-  setImage(bitmap: ImageBitmap): Promise<{ width: number; height: number }>
+  setImage(bitmap: ImageBitmap): Promise<{ width: number; height: number; cutout: boolean }>
   /** Subscribe to model loading state. Pass the callback wrapped in Comlink.proxy. */
   onModelState(cb: (id: ModelId, state: ModelState) => void): void
   /** Start loading a model if it is not loaded yet. Resolves when ready. */

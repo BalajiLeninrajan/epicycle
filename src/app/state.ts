@@ -50,6 +50,8 @@ export const source = signal<SourceKind>('none')
 export const sourceName = signal('drawing')
 /** Size of the working image (after the worker downscale) or of the SVG viewBox. */
 export const imageSize = signal<{ width: number; height: number } | null>(null)
+/** The image is a transparent cut-out, so its alpha is the subject mask. */
+export const imageCutout = signal(false)
 /** Downscaled copy of the photo for the mask editor. */
 export const preview = signal<ImageBitmap | null>(null)
 

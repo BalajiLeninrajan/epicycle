@@ -4,6 +4,7 @@ import type { Backend } from '../ml/backend'
 import { lineArt, loadLineArt, resetLineArt } from '../ml/lineart'
 import { loadSam, samPredict, samSetImage } from '../ml/sam'
 import { loadSegmenter, resetSegmenter, segment } from '../ml/segment'
+import { flattenCutout } from '../pipeline/image'
 import { createPipeline } from '../pipeline/pipeline'
 import type { ModelId, ModelState } from '../pipeline/types'
 import type { PipelineApi } from './api'
@@ -88,7 +89,9 @@ function bitmapToImageData(bitmap: ImageBitmap): ImageData {
 const api: PipelineApi = {
   async setImage(bitmap) {
     try {
-      return pipeline.setImage(bitmapToImageData(bitmap))
+      const image = bitmapToImageData(bitmap)
+      const cutout = flattenCutout(image.data, image.width, image.height)
+      return { ...pipeline.setImage(image, cutout), cutout: cutout !== null }
     } finally {
       bitmap.close()
     }
