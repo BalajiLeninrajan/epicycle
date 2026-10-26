@@ -1,4 +1,5 @@
 import { computed, useSignal } from '@preact/signals'
+import posthog from 'posthog-js'
 import { deriveParams } from '../pipeline/params'
 import type { LineStyle, ModelId, ModelState, PipelineSettings } from '../pipeline/types'
 import { Section, Segmented, Select, Slider, Toggle } from './controls'
@@ -543,6 +544,7 @@ function ShareControl() {
         // No clipboard permission: the field below lets them copy it by hand.
       }
       state.value = { status: 'done', ...link, copied }
+      posthog.capture('create_share_link', { short: link.short, copied })
     } catch (err) {
       state.value = { status: 'error', message: err instanceof Error ? err.message : String(err) }
     }
