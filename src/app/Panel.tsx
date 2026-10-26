@@ -12,6 +12,7 @@ import {
   undoSamPoint,
 } from './controller'
 import { ChevronIcon, DownloadIcon, LinkIcon } from './icons'
+import { MIN_FADE_FRACTION } from '../render/trail'
 import { logToInt, logToValue, valueToLog } from './logic'
 import { pickFile } from './Stage'
 import {
@@ -402,11 +403,28 @@ function AnimationSection() {
         value={render.trailMode.value}
         onChange={(v) => (render.trailMode.value = v)}
       />
+      {render.trailMode.value === 'fade' && <FadeSlider />}
       <ShowChips />
       <Toggle label="Follow the tip" checked={render.followTip.value} onChange={(v) => (render.followTip.value = v)} />
       {render.followTip.value && <ZoomSlider />}
       <LineWidthSlider />
     </Section>
+  )
+}
+
+/** Right is faster: a shorter tail. The readout is how long a stretch of line stays visible. */
+function FadeSlider() {
+  const f = render.fadeFraction.value
+  const sec = f * render.durationSec.value
+  return (
+    <Slider
+      label="Fade speed"
+      min={0}
+      max={1000}
+      value={1000 - valueToLog(f, MIN_FADE_FRACTION, 1)}
+      display={`fades over ${sec < 10 ? sec.toFixed(1) : Math.round(sec)} s`}
+      onInput={(pos) => (render.fadeFraction.value = Math.round(logToValue(1000 - pos, MIN_FADE_FRACTION, 1) * 1000) / 1000)}
+    />
   )
 }
 

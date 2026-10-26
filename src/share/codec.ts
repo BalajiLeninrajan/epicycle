@@ -7,7 +7,7 @@
 //   u16 circles                u16 duration * 10 (seconds)
 //   u8  flags: 1 full trail, 2 circles, 4 arrows, 8 formula, 16 follow tip
 //   u8  line width * 4         u16 follow zoom * 10
-//   u8  log2(sample count)
+//   u8  log2(sample count)     u8  fade fraction * 200
 //   varint point count, then per point zigzag varint dx, dy on a 4095-step grid over max(width, height)
 //   varint jump count, then varint gaps between jump segment indices
 import type { SinglePath } from '../pipeline/types'
@@ -26,12 +26,14 @@ export interface SharedDrawing {
   followTip: boolean
   followZoom: number
   lineWidth: number
+  /** Share of a loop the line takes to fade out. */
+  fadeFraction: number
 }
 
 const MAGIC = 0x45
 const VERSION = 1
 const GRID = 4095
-const HEADER_BYTES = 20
+const HEADER_BYTES = 21
 /** Far above any real drawing (stipple tops out around 20k); bounds decoding work and memory. */
 export const MAX_POINTS = 200_000
 /** Largest encoded share accepted, compressed. */
@@ -140,6 +142,7 @@ export function packDrawing(d: SharedDrawing): Uint8Array {
   w.u8(clamp(Math.round(d.lineWidth * 4), 1, 0xff))
   w.u16(clamp(Math.round(d.followZoom * 10), 1, 0xffff))
   w.u8(Math.round(Math.log2(d.sampleCount)))
+  w.u8(clamp(Math.round(d.fadeFraction * 200), 1, 200))
 
   const pts = d.path.points
   const count = Math.min(pts.length >> 1, MAX_POINTS)
@@ -183,6 +186,7 @@ export function unpackDrawing(bytes: Uint8Array): SharedDrawing {
   const followZoom = r.u16() / 10
   const log2n = r.u8()
   if (log2n !== 11 && log2n !== 12 && log2n !== 13) throw new Error('The shared drawing has a bad sample count')
+  const fadeFraction = Math.max(1, r.u8()) / 200
 
   const count = r.varint()
   if (count < 2 || count > MAX_POINTS) throw new Error('The shared drawing has a bad point count')
@@ -222,6 +226,7 @@ export function unpackDrawing(bytes: Uint8Array): SharedDrawing {
     followTip: (flags & 16) !== 0,
     followZoom: Math.max(0.1, followZoom),
     lineWidth: Math.max(0.25, lineWidth),
+    fadeFraction: Math.min(1, fadeFraction),
   }
 }
 

@@ -105,9 +105,14 @@ describe('fade buckets', () => {
   })
 
   it('tail length stays within [2, n]', () => {
-    expect(fadeLength(2)).toBe(2)
-    expect(fadeLength(4096)).toBe(4096)
-    expect(fadeLength(1)).toBe(1)
+    expect(fadeLength(2, 1)).toBe(2)
+    expect(fadeLength(4096, 1)).toBe(4096)
+    expect(fadeLength(1, 1)).toBe(1)
+    expect(fadeLength(4096, 0.25)).toBe(1024)
+    // Clamped to [MIN_FADE_FRACTION, 1].
+    expect(fadeLength(4096, 0)).toBe(Math.round(4096 * 0.05))
+    expect(fadeLength(4096, 3)).toBe(4096)
+    expect(fadeLength(4096, Number.NaN)).toBe(4096)
   })
 })
 

@@ -12,8 +12,10 @@ export interface RenderOptions {
   showCircles: boolean
   showArrows: boolean
   showTrail: boolean
-  /** 'fade': the line fades with age over one loop, like 3Blue1Brown's. 'full': the drawing stays. */
+  /** 'fade': the line fades with age, like 3Blue1Brown's. 'full': the drawing stays. */
   trailMode: 'full' | 'fade'
+  /** In fade mode, the share of a loop it takes the line to fade out (MIN_FADE_FRACTION to 1). */
+  fadeFraction: number
   /** Camera follows the tip. */
   followTip: boolean
   /** Zoom factor while following. */
@@ -29,6 +31,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   showArrows: true,
   showTrail: true,
   trailMode: 'fade',
+  fadeFraction: 1,
   followTip: false,
   followZoom: 6,
   lineWidth: 2,
@@ -336,7 +339,7 @@ export class EpicycleRenderer {
 
     // One loop of tail ending at the tip, split into buckets by age. Before the first wrap,
     // points from before t = 0 haven't been drawn yet and are skipped.
-    const len = fadeLength(n)
+    const len = fadeLength(n, this.opts.fadeFraction)
     const start = m - len + 1
     const first = this.looped ? 0 : -start
     for (let b = 0; b < FADE_BUCKETS; b++) {

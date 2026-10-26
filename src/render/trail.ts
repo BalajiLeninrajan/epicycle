@@ -7,8 +7,8 @@ export interface PathSink {
 /** Number of alpha steps the fade tail is split into. Each step is one stroke. */
 export const FADE_BUCKETS = 24
 
-/** Fade tail length as a fraction of the loop. A whole loop: the oldest line fades out just as the tip returns to it. */
-export const FADE_FRACTION = 1
+/** Shortest fade tail, as a fraction of the loop. The longest is a whole loop. */
+export const MIN_FADE_FRACTION = 0.05
 
 /** Opacity of connecting jumps relative to the drawing around them. */
 export const JUMP_ALPHA = 0.25
@@ -93,9 +93,10 @@ export function traceTrail(
   }
 }
 
-/** Tail length in points for a loop of n points. */
-export function fadeLength(n: number): number {
-  return Math.min(n, Math.max(2, Math.round(n * FADE_FRACTION)))
+/** Tail length in points for a loop of n points, when the line fades over `fraction` of a loop. */
+export function fadeLength(n: number, fraction: number): number {
+  const f = Math.min(1, Math.max(MIN_FADE_FRACTION, Number.isFinite(fraction) ? fraction : 1))
+  return Math.min(n, Math.max(2, Math.round(n * f)))
 }
 
 /**

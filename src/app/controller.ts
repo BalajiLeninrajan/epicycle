@@ -512,6 +512,7 @@ function currentDrawing(r: PipelineResult): SharedDrawing {
     followTip: render.followTip.peek(),
     followZoom: render.followZoom.peek(),
     lineWidth: render.lineWidth.peek(),
+    fadeFraction: render.fadeFraction.peek(),
   }
 }
 
@@ -560,6 +561,7 @@ function openShared(d: SharedDrawing): void {
     render.followTip.value = d.followTip
     render.followZoom.value = d.followZoom
     render.lineWidth.value = d.lineWidth
+    render.fadeFraction.value = d.fadeFraction
     showFormula.value = d.showFormula
   })
   runner.flush()

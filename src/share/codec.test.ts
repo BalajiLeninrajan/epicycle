@@ -25,6 +25,7 @@ function drawing(points: number[], jump: number[], over: Partial<SharedDrawing> 
     followTip: false,
     followZoom: 6,
     lineWidth: 2,
+    fadeFraction: 0.35,
     ...over,
   }
 }
