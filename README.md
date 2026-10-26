@@ -60,6 +60,8 @@ pnpm build
 pnpm dev:worker
 ```
 
+Add `?backend=wasm` to the URL to run every model on WebAssembly, the path browsers without WebGPU take.
+
 The dev server sends `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers, which multithreaded WebAssembly needs. Production gets the same headers from `public/_headers`.
 
 ## Limits
@@ -68,3 +70,4 @@ The dev server sends `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Pol
 - Busy photos give busy drawings. The line-art model draws texture as well as edges, so a detailed background or patterned clothing turns into a lot of short strokes.
 - Some connecting jumps are long. They draw at a quarter of the line's opacity, but they still show.
 - WebM recording happens in real time, one full loop.
+- Tested on Chromium, on WebGPU (an Intel GPU) and on the WebAssembly fallback. Other GPUs and browsers haven't been tried.
