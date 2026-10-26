@@ -4,14 +4,16 @@ import type { LineStyle, ModelId, ModelState, PipelineSettings } from '../pipeli
 import { Section, Segmented, Select, Slider, Toggle } from './controls'
 import {
   cancelRecording,
+  createShareLink,
   exportAs,
   loadModel,
   resetMask,
   setMaskEditing,
   undoSamPoint,
 } from './controller'
-import { ChevronIcon, DownloadIcon } from './icons'
+import { ChevronIcon, DownloadIcon, LinkIcon } from './icons'
 import { logToInt, logToValue, valueToLog } from './logic'
+import { pickFile } from './Stage'
 import {
   error,
   exporting,
@@ -60,6 +62,7 @@ export function Panel() {
         <RecordingBar />
         {/* A disabled fieldset disables every control inside it while recording. */}
         <fieldset class="fd-fieldset cn-divide" disabled={recording.value}>
+          {source.value === 'shared' && <SharedNote />}
           {isImage && !modelsReady.value && <ModelStatus />}
           {isImage && <PictureSection />}
           <AnimationSection />
@@ -493,7 +496,80 @@ function ExportSection() {
       <span class="cn-meta">
         {webm ? 'WebM records one full loop in real time.' : 'This browser cannot record WebM.'}
       </span>
+      <ShareControl />
     </Section>
+  )
+}
+
+type ShareState =
+  | { status: 'idle' }
+  | { status: 'working' }
+  | { status: 'done'; url: string; short: boolean; copied: boolean }
+  | { status: 'error'; message: string }
+
+/** Makes a link to the drawing (the line and settings, not the picture) and copies it. */
+function ShareControl() {
+  const state = useSignal<ShareState>({ status: 'idle' })
+  const s = state.value
+  const share = async () => {
+    state.value = { status: 'working' }
+    try {
+      const link = await createShareLink()
+      let copied = false
+      try {
+        await navigator.clipboard.writeText(link.url)
+        copied = true
+      } catch {
+        // No clipboard permission: the field below lets them copy it by hand.
+      }
+      state.value = { status: 'done', ...link, copied }
+    } catch (err) {
+      state.value = { status: 'error', message: err instanceof Error ? err.message : String(err) }
+    }
+  }
+  return (
+    <div class="cn-stack cn-gap-8">
+      <button
+        type="button"
+        class="btn btn-primary is-sm cn-fit"
+        disabled={!hasDrawing.value || s.status === 'working'}
+        onClick={() => void share()}
+      >
+        <LinkIcon />
+        {s.status === 'working' ? 'Making a link' : 'Share link'}
+      </button>
+      {s.status === 'done' && (
+        <>
+          <input
+            class="input"
+            readOnly
+            value={s.url}
+            aria-label="Share link"
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <span class="cn-meta" aria-live="polite">
+            {s.copied ? 'Copied. ' : ''}
+            {s.short
+              ? 'Only the line and animation settings are shared, not your picture.'
+              : 'The drawing is packed into the link itself, so it is long. Only the line is shared, not your picture.'}
+          </span>
+        </>
+      )}
+      {s.status === 'error' && <span class="tag cn-tone-red">{s.message}</span>}
+    </div>
+  )
+}
+
+function SharedNote() {
+  return (
+    <div class="cn-p-16">
+      <div class="banner cn-tone-mauve cn-stack cn-gap-8" role="status">
+        <span>Someone shared this drawing with you. Only the line came with it, not the picture.</span>
+        <button type="button" class="btn btn-secondary is-sm cn-fit" onClick={pickFile}>
+          Make your own
+        </button>
+      </div>
+    </div>
   )
 }
 

@@ -24,10 +24,16 @@ The panel follows what you're doing:
 
 - **Picture**: subject only or keep the background, mask editing, the style (Lines, Edges or Dots), Detail, the outline, and a hold-to-see button that overlays the extracted strokes.
 - **Animation**: circles (1 up to the sample count, log scale; around 1000 is enough for a face), loop duration, a trail that fades over one loop like the video or stays up in full, which of circles, arrows and the formula to show, follow the tip, and line width.
-- **Export**: a PNG of the finished drawing, a WebM of one loop, or the single-line path as SVG (handy for pen plotters).
+- **Export**: a PNG of the finished drawing, a WebM of one loop, the single-line path as SVG (handy for pen plotters), or a share link.
 - **Fine-tuning**, folded away: ink threshold, shortest stroke and simplification (each follows Detail until you move it), and the sample count.
 
 Paste an image with Ctrl+V or drop it on the page.
+
+## Share links
+
+A link carries the single-line path and the animation settings, never the picture. The path goes on a 4095-step grid as delta-encoded varints and gets deflated, so a portrait is about 3 KB.
+
+On the deployed site, **Share link** stores that in Workers KV and gives back a short link like `/s/uyS7Zgp8sV3L`. The id is a hash of the drawing, so sharing the same one twice gives the same link. Without the API (plain `pnpm dev`, or offline), the drawing goes into the URL fragment instead: `/#d=…`, a few thousand characters, with no server involved at all.
 
 ## Models
 
@@ -54,15 +60,23 @@ pnpm typecheck
 pnpm build
 ```
 
+`pnpm dev` doesn't run the share API, so share links fall back to the long fragment form. To try short links locally, run the Worker with a local KV namespace:
+
+```console
+pnpm dev:worker
+```
+
 The dev server sends `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers, which multithreaded WebAssembly needs. Production gets the same headers from `public/_headers`.
 
 ## Deploy
 
-It is a static site on Cloudflare Workers:
+A Worker serves the static site and the share API (`server/index.ts`):
 
 ```console
 pnpm deploy
 ```
+
+The first deploy creates the `SHARES` KV namespace and writes its id back into `wrangler.jsonc`. Link creation is limited to 20 per minute per IP.
 
 ## Limits
 

@@ -2,7 +2,8 @@
 import { batch, effect } from '@preact/signals'
 import { proxy, type Remote } from 'comlink'
 import { svgToStrokes } from '../pipeline/svg'
-import type { ModelId, PipelineResult, Polyline, SamPoint } from '../pipeline/types'
+import { decodeDrawing, encodeDrawing, fromBase64Url, type SharedDrawing, toBase64Url } from '../share/codec'
+import type { ModelId, PipelineResult, Polyline, SamPoint, SinglePath } from '../pipeline/types'
 import { EpicycleRenderer, type RenderOptions } from '../render/epicycles'
 import { exportPng, pathToSvg, recordWebm } from '../render/export'
 import type { PipelineApi } from '../worker/api'
@@ -24,6 +25,7 @@ import {
   running,
   samPoints,
   settings,
+  showFormula,
   source,
   sourceName,
   time,
@@ -40,6 +42,7 @@ let pipeline: Remote<PipelineApi> | null = null
 let subscribed = false
 let modelsStarted = false
 let svgData: { strokes: Polyline[]; width: number; height: number } | null = null
+let sharedData: { path: SinglePath; width: number; height: number } | null = null
 let renderer: EpicycleRenderer | null = null
 let stageCanvas: HTMLCanvasElement | null = null
 
@@ -65,6 +68,9 @@ const runner = latestRunner<PipelineResult>(
     const s = pipelineSettings.peek()
     if (source.peek() === 'svg' && svgData) {
       return api().runStrokes(svgData.strokes, svgData.width, svgData.height, s.sampleCount)
+    }
+    if (source.peek() === 'shared' && sharedData) {
+      return api().runPath(sharedData.path, sharedData.width, sharedData.height, s.sampleCount)
     }
     return api().run(s)
   },
@@ -148,6 +154,8 @@ class Superseded extends Error {}
 
 /** Drop in-flight work that belongs to the previous source. */
 function resetForNewSource(): void {
+  // Leaving a shared drawing: drop its address so a reload doesn't bring it back.
+  if (SHORT_LINK.test(location.pathname) || location.hash.startsWith('#d=')) history.replaceState(null, '', '/')
   runner.cancel()
   samSeq++
   committedPoints = []
@@ -214,6 +222,7 @@ async function openImage(blob: Blob, name: string, seq = ++openSeq): Promise<voi
     throw new Superseded()
   }
   svgData = null
+  sharedData = null
   batch(() => {
     const old = preview.peek()
     preview.value = bmp
@@ -236,6 +245,7 @@ function openSvg(text: string, name: string, seq = ++openSeq): void {
   if (seq !== openSeq) return
   resetForNewSource()
   svgData = parsed
+  sharedData = null
   batch(() => {
     preview.peek()?.close()
     preview.value = null
@@ -471,3 +481,112 @@ function download(blob: Blob, name: string): void {
   // Some browsers start the download asynchronously; keep the URL alive for a bit.
   setTimeout(() => URL.revokeObjectURL(url), 30_000)
 }
+
+// ── Sharing ───────────────────────────────────────────────────────────────
+
+/** /s/<id>: a short link stored by the Worker (server/index.ts). */
+const SHORT_LINK = /^\/s\/([A-Za-z0-9_-]{12})$/
+
+export interface ShareLink {
+  url: string
+  /** False when the short-link API was unreachable and the drawing went into the fragment. */
+  short: boolean
+}
+
+/** Pack the current drawing: the line path and animation settings, never the picture. */
+function currentDrawing(r: PipelineResult): SharedDrawing {
+  return {
+    width: r.width,
+    height: r.height,
+    path: r.path,
+    sampleCount: settings.sampleCount.peek(),
+    circles: Math.min(render.circles.peek(), r.coeffs.n),
+    durationSec: render.durationSec.peek(),
+    trailMode: render.trailMode.peek(),
+    showCircles: render.showCircles.peek(),
+    showArrows: render.showArrows.peek(),
+    showFormula: showFormula.peek(),
+    followTip: render.followTip.peek(),
+    followZoom: render.followZoom.peek(),
+    lineWidth: render.lineWidth.peek(),
+  }
+}
+
+/** A short link when the API is there (deployed, or wrangler dev), else the drawing in the fragment. */
+export async function createShareLink(): Promise<ShareLink> {
+  const r = result.peek()
+  if (!r || !hasDrawing.peek()) throw new Error('There is no drawing to share yet')
+  const bytes = await encodeDrawing(currentDrawing(r))
+  try {
+    const res = await fetch('/api/share', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: bytes.slice(),
+    })
+    if (res.ok) {
+      const { id } = (await res.json()) as { id: string }
+      if (/^[A-Za-z0-9_-]{12}$/.test(id)) return { url: `${location.origin}/s/${id}`, short: true }
+    }
+  } catch {
+    // Offline or no API (plain vite dev): the fragment link needs no server.
+  }
+  return { url: `${location.origin}/#d=${toBase64Url(bytes)}`, short: false }
+}
+
+function openShared(d: SharedDrawing): void {
+  resetForNewSource()
+  svgData = null
+  sharedData = { path: d.path, width: d.width, height: d.height }
+  batch(() => {
+    preview.peek()?.close()
+    preview.value = null
+    imageSize.value = { width: d.width, height: d.height }
+    sourceName.value = 'shared'
+    source.value = 'shared'
+    result.value = null
+    samPoints.value = []
+    maskOutline.value = []
+    maskEditing.value = false
+    settings.sampleCount.value = d.sampleCount
+    render.circles.value = Math.max(1, d.circles)
+    render.durationSec.value = d.durationSec
+    render.trailMode.value = d.trailMode
+    render.showCircles.value = d.showCircles
+    render.showArrows.value = d.showArrows
+    render.followTip.value = d.followTip
+    render.followZoom.value = d.followZoom
+    render.lineWidth.value = d.lineWidth
+    showFormula.value = d.showFormula
+  })
+  runner.flush()
+}
+
+/** Open the drawing a share link points at, if the page was opened from one. */
+export async function openFromLocation(): Promise<void> {
+  const short = SHORT_LINK.exec(location.pathname)
+  const hash = location.hash.startsWith('#d=') ? location.hash.slice(3) : null
+  if (!short && !hash) return
+  const seq = ++openSeq
+  error.value = null
+  try {
+    let bytes: Uint8Array
+    if (short) {
+      const res = await fetch(`/api/share/${short[1]}`)
+      if (res.status === 404) throw new Error('This shared drawing does not exist')
+      if (!res.ok) throw new Error(`Could not load the shared drawing (HTTP ${res.status})`)
+      bytes = new Uint8Array(await res.arrayBuffer())
+    } else {
+      bytes = fromBase64Url(hash ?? '')
+    }
+    const drawing = await decodeDrawing(bytes)
+    if (seq !== openSeq) return
+    openShared(drawing)
+  } catch (err) {
+    if (seq === openSeq) error.value = errorMessage(err)
+  }
+}
+
+// Pasting a fragment link into the address bar of an open tab only fires hashchange.
+window.addEventListener('hashchange', () => {
+  if (location.hash.startsWith('#d=')) void openFromLocation()
+})

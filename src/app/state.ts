@@ -42,7 +42,8 @@ export const pipelineSettings = computed<PipelineSettings>(() => ({
 
 export const render = signalsOf<RenderOptions>({ ...DEFAULT_RENDER_OPTIONS })
 
-export type SourceKind = 'none' | 'image' | 'svg'
+/** 'shared': a drawing opened from a share link; only its path and settings are known. */
+export type SourceKind = 'none' | 'image' | 'svg' | 'shared'
 
 export const source = signal<SourceKind>('none')
 /** Name of the uploaded file, used for download names. */

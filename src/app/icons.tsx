@@ -66,3 +66,10 @@ export const EpicycleIcon = (p: { class?: string }) => (
     <path d="M13.5 8c2.5-2 5.5-1 6.5 2" />
   </Icon>
 )
+
+export const LinkIcon = () => (
+  <Icon>
+    <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+    <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+  </Icon>
+)
