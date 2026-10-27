@@ -54,6 +54,7 @@
 }
 
 .fd-overlay { pointer-events: none; }
+.fd-overlay.is-idle { visibility: hidden; }
 
 /* The Fourier series, bottom-left over the animation. */
 .fd-formula {

@@ -2,7 +2,18 @@ import { evalChain, reconstruct } from '../fourier/epicycles'
 import type { Coeffs, SampledPath } from '../pipeline/types'
 import { newCamera, stepCamera, viewTransform, type View } from './camera'
 import { mixRgb, parseRgb, readThemeColors, type ThemeColors } from './theme'
-import { FADE_BUCKETS, JUMP_ALPHA, MAX_FADE_FRACTION, NO_SINK, bucketAlpha, bucketStart, fadeLength, resampleJump, trailSize, traceTrail } from './trail'
+import {
+  FADE_BUCKETS,
+  JUMP_ALPHA,
+  MAX_FADE_FRACTION,
+  bucketAlpha,
+  bucketStart,
+  fadeLength,
+  resampleJump,
+  trailSize,
+  traceTrail,
+  type TraceClip,
+} from './trail'
 
 export interface RenderOptions {
   /** Number of circles K. */
@@ -81,6 +92,14 @@ export class EpicycleRenderer {
   private dprQuery: MediaQueryList | null = null
   private readonly cam = newCamera()
   private readonly view: View = { ox: 0, oy: 0, s: 1 }
+  private readonly clip: TraceClip = { width: 0, height: 0, margin: 0 }
+  /**
+   * In Full mode, once the first loop is done and the camera is at rest, the drawing stops
+   * changing. It's stroked once into this layer and copied every frame after that.
+   */
+  private layer: HTMLCanvasElement | null = null
+  /** The view and line width the layer was drawn with; empty when it's stale. */
+  private layerKey = ''
   private camSettled = true
   private disposed = false
   private onceDone: (() => void) | null = null
@@ -88,7 +107,8 @@ export class EpicycleRenderer {
   private readonly darkQuery: MediaQueryList | null
 
   constructor(canvas: HTMLCanvasElement) {
-    const ctx = canvas.getContext('2d')
+    // Every frame fills the background, so the canvas can be opaque and skip blending with the page.
+    const ctx = canvas.getContext('2d', { alpha: false })
     if (ctx === null) throw new Error('EpicycleRenderer: 2D canvas context unavailable')
     this.canvas = canvas
     this.ctx = ctx
@@ -124,6 +144,7 @@ export class EpicycleRenderer {
     if (!next.playing && this.opts.playing) this.finishOnce()
     if (next.playing && !this.opts.playing && this.t >= 1) this.t = 0
     this.opts = next
+    if (next.trailMode !== 'full') this.layer = null
     if (opts.circles !== undefined) this.updateTrail()
     this.requestDraw()
   }
@@ -167,6 +188,7 @@ export class EpicycleRenderer {
     document.removeEventListener('visibilitychange', this.onVisibility)
     this.darkQuery?.removeEventListener('change', this.onScheme)
     this.dprQuery?.removeEventListener('change', this.onDprChange)
+    this.layer = null
     this.finishOnce()
   }
 
@@ -186,6 +208,7 @@ export class EpicycleRenderer {
     const trail = reconstruct(coeffs, k, trailSize(sampled.re.length))
     this.trailRe = trail.re
     this.trailIm = trail.im
+    this.layerKey = ''
     if (this.chain.length < 2 * (k + 1)) this.chain = new Float64Array(2 * (k + 1))
   }
 
@@ -240,6 +263,7 @@ export class EpicycleRenderer {
   private refreshColors(): void {
     this.colors = readThemeColors(this.canvas)
     this.colorsDirty = false
+    this.layerKey = ''
     const fg = parseRgb(this.ctx, this.colors.trail)
     const bg = parseRgb(this.ctx, this.colors.bg)
     const mix = (a: number) => (fg && bg ? mixRgb(fg, bg, a) : this.colors.trail)
@@ -294,6 +318,9 @@ export class EpicycleRenderer {
     if (this.colorsDirty) this.refreshColors()
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.globalAlpha = 1
+    // Keep this even though the fill covers everything: Chromium drops the previous frame's
+    // queued draws on a full clearRect but not on an opaque fillRect. Without it a frame went
+    // from ~5 ms to ~70 ms on an Intel iGPU.
     ctx.clearRect(0, 0, w, h)
     ctx.fillStyle = this.colors.bg
     ctx.fillRect(0, 0, w, h)
@@ -315,8 +342,11 @@ export class EpicycleRenderer {
     const tipSy = view.oy + tipY * view.s
 
     ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
+    // Trail segments are about a pixel long, too short for the join style to show, and
+    // round joins cost the most to tessellate.
+    ctx.lineJoin = 'bevel'
     if (this.opts.showTrail) this.drawTrail(view, tipSx, tipSy)
+    ctx.lineJoin = 'round'
     if (this.opts.showCircles) this.drawCircles(coeffs, view, w, h)
     if (this.opts.showArrows) this.drawArrows(coeffs, view, tipSx, tipSy)
   }
@@ -329,11 +359,15 @@ export class EpicycleRenderer {
     const tipX = m < n ? tipSx : Number.NaN
     const tipY = m < n ? tipSy : Number.NaN
     this.ctx.lineWidth = this.opts.lineWidth * this.dpr
+    this.clip.width = this.canvas.width
+    this.clip.height = this.canvas.height
+    this.clip.margin = this.ctx.lineWidth
 
     if (this.opts.trailMode === 'full') {
-      // After the first loop the whole drawing stays up.
-      if (this.loops > 0) this.strokeRun(view, 0, n + 1, Number.NaN, Number.NaN, this.colors.trail, this.jumpColor)
-      else this.strokeRun(view, 0, m + 1, tipX, tipY, this.colors.trail, this.jumpColor)
+      // After the first loop the whole drawing stays up. With the camera at rest it doesn't move either.
+      if (this.loops === 0) this.strokeRun(this.ctx, view, 0, m + 1, tipX, tipY, this.colors.trail, this.jumpColor)
+      else if (this.cam.follow === 0) this.drawLayer(view, n)
+      else this.strokeRun(this.ctx, view, 0, n + 1, Number.NaN, Number.NaN, this.colors.trail, this.jumpColor)
       return
     }
 
@@ -349,6 +383,7 @@ export class EpicycleRenderer {
       const s1 = last ? len - 1 : bucketStart(b + 1, FADE_BUCKETS, len)
       if (s1 < s0 || (s1 === s0 && !last)) continue
       this.strokeRun(
+        this.ctx,
         view,
         start + s0,
         s1 - s0 + 1,
@@ -360,19 +395,48 @@ export class EpicycleRenderer {
     }
   }
 
+  /** The whole closed trail from the layer, redrawing the layer first if it's stale. */
+  private drawLayer(view: View, n: number): void {
+    const key = `${view.ox} ${view.oy} ${view.s} ${this.ctx.lineWidth}`
+    if (this.layer === null || this.layerKey !== key) {
+      this.layer ??= document.createElement('canvas')
+      // Setting the size clears the layer and resets its context.
+      this.layer.width = this.canvas.width
+      this.layer.height = this.canvas.height
+      const lc = this.layer.getContext('2d')
+      if (lc === null) {
+        this.layer = null
+        this.strokeRun(this.ctx, view, 0, n + 1, Number.NaN, Number.NaN, this.colors.trail, this.jumpColor)
+        return
+      }
+      lc.lineCap = this.ctx.lineCap
+      lc.lineJoin = this.ctx.lineJoin
+      lc.lineWidth = this.ctx.lineWidth
+      this.strokeRun(lc, view, 0, n + 1, Number.NaN, Number.NaN, this.colors.trail, this.jumpColor)
+      this.layerKey = key
+    }
+    this.ctx.drawImage(this.layer, 0, 0)
+  }
+
   /** Stroke count trail points from start: jumps first in their fainter color, then the line over them. */
-  private strokeRun(view: View, start: number, count: number, tipX: number, tipY: number, line: string, jumps: string): void {
-    const ctx = this.ctx
+  private strokeRun(
+    ctx: CanvasRenderingContext2D,
+    view: View,
+    start: number,
+    count: number,
+    tipX: number,
+    tipY: number,
+    line: string,
+    jumps: string,
+  ): void {
     const { ox, oy, s } = view
-    const jump = this.trailJump
-    ctx.beginPath()
-    traceTrail(NO_SINK, ctx, this.trailRe, this.trailIm, jump, start, count, ox, oy, s, tipX, tipY)
+    const linePath = new Path2D()
+    const jumpPath = new Path2D()
+    traceTrail(linePath, jumpPath, this.trailRe, this.trailIm, this.trailJump, start, count, ox, oy, s, tipX, tipY, this.clip)
     ctx.strokeStyle = jumps
-    ctx.stroke()
-    ctx.beginPath()
-    traceTrail(ctx, NO_SINK, this.trailRe, this.trailIm, jump, start, count, ox, oy, s, tipX, tipY)
+    ctx.stroke(jumpPath)
     ctx.strokeStyle = line
-    ctx.stroke()
+    ctx.stroke(linePath)
   }
 
   private drawCircles(coeffs: Coeffs, view: View, w: number, h: number): void {

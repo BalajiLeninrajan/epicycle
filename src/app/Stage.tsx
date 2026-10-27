@@ -136,6 +136,8 @@ export function Stage() {
 
   const empty = source.value === 'none'
   const editing = maskEditing.value
+  // Same conditions drawOverlay draws under. Hidden, the empty overlay isn't composited every frame.
+  const overlayShown = (editing && preview.value !== null) || (showStrokes.value && !render.followTip.value && result.value !== null)
 
   return (
     <div
@@ -154,7 +156,7 @@ export function Stage() {
         <canvas ref={canvasRef} class="fd-canvas" aria-label="Epicycle animation" role="img" />
         <canvas
           ref={overlayRef}
-          class={editing ? 'fd-canvas fd-overlay is-editing' : 'fd-canvas fd-overlay'}
+          class={`fd-canvas fd-overlay${editing ? ' is-editing' : ''}${overlayShown ? '' : ' is-idle'}`}
           aria-hidden={!editing}
           aria-label={editing ? 'Photo for mask editing. Click to add the subject, shift-click to remove.' : undefined}
           role={editing ? 'img' : undefined}
