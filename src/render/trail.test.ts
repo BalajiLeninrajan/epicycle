@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   FADE_BUCKETS,
+  NO_SINK,
   bucketAlpha,
   bucketStart,
   fadeLength,
@@ -73,6 +74,14 @@ describe('traceTrail', () => {
   it('closes the loop with count = n + 1', () => {
     const { xs, ys } = line(3)
     expect(trace(xs, ys, null, 0, 4).main).toEqual(['M0,0', 'L1,-1', 'L2,-2', 'L0,0'])
+  })
+
+  it('drops links past one edge and starts a new subpath after them', () => {
+    const xs = Float64Array.of(1, 5, 20, 30, 6, 2)
+    const ys = new Float64Array(6)
+    const r = new Recorder()
+    traceTrail(r, NO_SINK, xs, ys, null, 0, 6, 0, 0, 1, Number.NaN, Number.NaN, { width: 10, height: 10, margin: 1 })
+    expect(r.ops).toEqual(['M1,0', 'L5,0', 'L20,0', 'M30,0', 'L6,0', 'L2,0'])
   })
 
   it('draws nothing for empty input, zero count or a single point', () => {
