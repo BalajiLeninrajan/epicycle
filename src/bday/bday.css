@@ -65,7 +65,7 @@ body { background: var(--fd-bg); overflow: hidden; }
 .bd-zoom-value + .bd-zoom-value { min-width: 9ch; }
 
 /* Same face as the drawing's text. */
-.bd-ta { font-family: "Baloo Thambi 2", "Noto Sans Tamil", sans-serif; font-weight: 600; font-size: 1.15em; }
+.bd-ta-p { font-family: "Baloo Thambi 2", "Noto Sans Tamil", sans-serif; font-weight: 500; font-size: 1.1rem; line-height: 1.6; }
 
 /* Blue instead of the design system's mauve: the line, the Play button, the slider. */
 :root {
