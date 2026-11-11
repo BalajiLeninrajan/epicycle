@@ -176,7 +176,7 @@ function App() {
   const slider = Math.round((Math.log(zoom) / Math.log(MAX_ZOOM)) * SLIDER_STEPS)
   return (
     <main class="bd-stage">
-      <canvas ref={canvasRef} class="bd-canvas" role="img" aria-label="A drawing made by 1500 rotating circles" />
+      <canvas ref={canvasRef} class="bd-canvas" role="img" aria-label="A drawing made by rotating circles" />
       <div
         ref={formulaRef}
         class={`fd-formula bd-formula cn-r-card bd-fade${phase === 'intro' ? ' is-hidden' : ''}`}
@@ -184,7 +184,6 @@ function App() {
       >
         <div class={`bd-eq${started ? '' : ' is-waiting'}`} dangerouslySetInnerHTML={{ __html: SERIES }} />
         <div class={`bd-eq${started ? '' : ' is-waiting'}`} dangerouslySetInnerHTML={{ __html: COEFFICIENT }} />
-        <span class="cn-meta">{CIRCLES} circles, largest |c<sub>n</sub>| first</span>
       </div>
       {!started && (
         <>
