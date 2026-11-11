@@ -13,8 +13,7 @@ const CIRCLES = 1500
 const LOOP_SEC = 30
 /** The trail lasts 1.75 loops, so the part about to be redrawn is still at about a quarter strength. */
 const FADE_LOOPS = 1.75
-/** Deep enough that only the last few, smallest circles fill the screen. */
-const MAX_ZOOM = 20000
+const MAX_ZOOM = 80
 /** By this zoom the camera is centred on the tip; below it the view slides there from the drawing's centre. */
 const FOLLOW_FULL_AT = 2.5
 const SLIDER_STEPS = 1000

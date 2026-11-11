@@ -67,10 +67,6 @@ const TAU = 2 * Math.PI
 const MIN_RADIUS_PX = 0.5
 /** Longest frame step; a stalled tab resumes instead of skipping ahead. */
 const MAX_DT = 0.1
-/** Past this many screen pixels between stored trail samples, the trail near the tip is evaluated directly. */
-const FINE_SPACING_PX = 3
-/** Screen pixels between points of the directly evaluated trail. */
-const FINE_STEP_PX = 3
 
 /**
  * Canvas 2D epicycle animation. Colors come from CSS custom properties on the canvas:
@@ -91,11 +87,6 @@ export class EpicycleRenderer {
   private trailRe: Float64Array = new Float64Array(0)
   private trailIm: Float64Array = new Float64Array(0)
   private trailJump: Uint8Array = new Uint8Array(0)
-  /** Length of one loop of the trail, in world units. */
-  private trailLength = 0
-  /** Scratch for the fine trail: per-term phasors and per-step rotations. */
-  private fineZ = new Float64Array(0)
-  private fineR = new Float64Array(0)
   private chain = new Float64Array(2)
   /** In [0, 1]; equals 1 only after playOnce finishes. */
   private t = 0
@@ -119,8 +110,6 @@ export class EpicycleRenderer {
   private camY = 0
   private camVX = 0
   private camVY = 0
-  /** Scale the smooth-follow camera last ran at, so a zoom change can keep the tip where it is on screen. */
-  private camS = 0
   private readonly clip: TraceClip = { width: 0, height: 0, margin: 0 }
   /**
    * In Full mode, once the first loop is done and the camera is at rest, the drawing stops
@@ -237,12 +226,6 @@ export class EpicycleRenderer {
     const trail = reconstruct(coeffs, k, trailSize(sampled.re.length))
     this.trailRe = trail.re
     this.trailIm = trail.im
-    let len = 0
-    for (let i = 0, n = trail.re.length; i < n; i++) {
-      const j = i + 1 < n ? i + 1 : 0
-      len += Math.hypot(trail.re[j] - trail.re[i], trail.im[j] - trail.im[i])
-    }
-    this.trailLength = len
     this.layerKey = ''
     if (this.chain.length < 2 * (k + 1)) this.chain = new Float64Array(2 * (k + 1))
   }
@@ -391,17 +374,6 @@ export class EpicycleRenderer {
     const s = fitScale(w, h) * this.cam.zoom
     const tx = this.cam.follow * tipX
     const ty = this.cam.follow * tipY
-    // Zooming keeps the camera's lag the same in screen pixels, not world units. Otherwise lag
-    // picked up zoomed out turns into tens of thousands of pixels zoomed in, and the capped
-    // camera takes minutes to catch up.
-    if (this.camS > 0 && s > 0 && s !== this.camS) {
-      const k = this.camS / s
-      this.camX = tx - (tx - this.camX) * k
-      this.camY = ty - (ty - this.camY) * k
-      this.camVX *= k
-      this.camVY *= k
-    }
-    this.camS = s
     if (s > 0 && dt > 0) {
       const dx = (tx - this.camX) * s
       const dy = (ty - this.camY) * s
@@ -461,122 +433,22 @@ export class EpicycleRenderer {
     const len = fadeLength(n, this.opts.fadeFraction)
     const start = m - len + 1
     const first = Math.max(0, len - 1 - (this.loops * n + m))
-
-    // Zoomed in far enough that trail samples sit more than a few pixels apart, the stored trail
-    // turns into straight chords. Around the tip it's replaced by one evaluated from the series
-    // at screen resolution: behind the tip (just drawn) and ahead of it (the previous loop).
-    const spacing = (this.trailLength / n) * view.s
-    let dn = 0
-    let window = 0
-    if (spacing > FINE_SPACING_PX && this.trailLength > 0) {
-      window = Math.hypot(this.canvas.width, this.canvas.height) / (view.s * this.trailLength)
-      dn = Math.min(Math.floor(n / 4), Math.ceil(window * n) + 1)
-      window = Math.min(window, dn / n)
-    }
-    const tailEnd = len - 1 - dn // last offset the stored trail draws up to
-    const aheadFrom = len - n // offsets [aheadFrom, aheadFrom + dn) are the previous loop just ahead of the tip
-    const aheadTo = aheadFrom + dn - 1
-    const runs: [number, number][] = []
     for (let b = 0; b < FADE_BUCKETS; b++) {
       const last = b === FADE_BUCKETS - 1
       const s0 = Math.max(bucketStart(b, FADE_BUCKETS, len), first)
-      let s1 = last ? len - 1 : bucketStart(b + 1, FADE_BUCKETS, len)
-      if (dn > 0) s1 = Math.min(s1, tailEnd)
-      if (s1 < s0 || (s1 === s0 && !(last && dn === 0))) continue
-      runs.length = 0
-      if (dn > 0 && aheadTo >= s0 && aheadFrom <= s1) {
-        if (aheadFrom - 1 >= s0) runs.push([s0, aheadFrom - 1])
-        if (aheadTo + 1 <= s1) runs.push([aheadTo + 1, s1])
-      } else {
-        runs.push([s0, s1])
-      }
-      for (const [r0, r1] of runs) {
-        const toTip = last && dn === 0 && r1 === len - 1
-        this.strokeRun(
-          this.ctx,
-          view,
-          start + r0,
-          r1 - r0 + 1,
-          toTip ? tipX : Number.NaN,
-          toTip ? tipY : Number.NaN,
-          this.fadeColors[b] ?? this.colors.trail,
-          this.fadeJumpColors[b] ?? this.jumpColor,
-        )
-      }
+      const s1 = last ? len - 1 : bucketStart(b + 1, FADE_BUCKETS, len)
+      if (s1 < s0 || (s1 === s0 && !last)) continue
+      this.strokeRun(
+        this.ctx,
+        view,
+        start + s0,
+        s1 - s0 + 1,
+        last ? tipX : Number.NaN,
+        last ? tipY : Number.NaN,
+        this.fadeColors[b] ?? this.colors.trail,
+        this.fadeJumpColors[b] ?? this.jumpColor,
+      )
     }
-    if (dn === 0) return
-
-    const t = this.t
-    const B = FADE_BUCKETS
-    // Behind the tip, newest color. Before the first loop has gone round, nothing exists before t = 0.
-    const behind0 = this.loops === 0 ? Math.max(0, t - window) : t - window
-    if (t > behind0) this.strokeFine(view, behind0, t, this.fadeColors[B - 1], this.fadeJumpColors[B - 1])
-    // Ahead of the tip: what the previous loop drew there, if it's still on screen.
-    if (aheadTo >= first && aheadFrom >= 0) {
-      const b = Math.min(B - 1, Math.floor(((aheadFrom + dn / 2) * B) / Math.max(1, len - 1)))
-      this.strokeFine(view, t, t + window, this.fadeColors[b], this.fadeJumpColors[b])
-    }
-  }
-
-  /**
-   * The series evaluated directly for t in [t0, t1], every few screen pixels, using one rotation
-   * per term per step instead of trig per point.
-   */
-  private strokeFine(view: View, t0: number, t1: number, line: string | undefined, jumps: string | undefined): void {
-    const coeffs = this.coeffs
-    if (coeffs === null || t1 <= t0) return
-    const k = this.k
-    const steps = Math.min(4000, Math.max(2, Math.ceil(((t1 - t0) * this.trailLength * view.s) / FINE_STEP_PX)))
-    const dt = (t1 - t0) / steps
-    if (this.fineZ.length < 2 * k) {
-      this.fineZ = new Float64Array(2 * k)
-      this.fineR = new Float64Array(2 * k)
-    }
-    const z = this.fineZ
-    const r = this.fineR
-    for (let i = 0; i < k; i++) {
-      const f = TAU * coeffs.freq[i]
-      const a = f * t0
-      const c = Math.cos(a)
-      const sn = Math.sin(a)
-      z[2 * i] = coeffs.re[i] * c - coeffs.im[i] * sn
-      z[2 * i + 1] = coeffs.re[i] * sn + coeffs.im[i] * c
-      r[2 * i] = Math.cos(f * dt)
-      r[2 * i + 1] = Math.sin(f * dt)
-    }
-    const { ox, oy, s } = view
-    const linePath = new Path2D()
-    const jumpPath = new Path2D()
-    const n = this.trailJump.length
-    let px = 0
-    let py = 0
-    for (let j = 0; j <= steps; j++) {
-      let x = 0
-      let y = 0
-      for (let i = 0; i < k; i++) {
-        const zr = z[2 * i]
-        const zi = z[2 * i + 1]
-        x += zr
-        y += zi
-        z[2 * i] = zr * r[2 * i] - zi * r[2 * i + 1]
-        z[2 * i + 1] = zr * r[2 * i + 1] + zi * r[2 * i]
-      }
-      const sx = ox + x * s
-      const sy = oy + y * s
-      if (j > 0) {
-        const tt = t0 + (j - 0.5) * dt
-        const idx = ((Math.floor(tt * n) % n) + n) % n
-        const p = n > 0 && this.trailJump[idx] === 1 ? jumpPath : linePath
-        p.moveTo(px, py)
-        p.lineTo(sx, sy)
-      }
-      px = sx
-      py = sy
-    }
-    this.ctx.strokeStyle = jumps ?? this.jumpColor
-    this.ctx.stroke(jumpPath)
-    this.ctx.strokeStyle = line ?? this.colors.trail
-    this.ctx.stroke(linePath)
   }
 
   /** The whole closed trail from the layer, redrawing the layer first if it's stale. */
@@ -652,35 +524,15 @@ export class EpicycleRenderer {
     const chain = this.chain
     const amp = coeffs.amp
     const { ox, oy, s } = view
-    const w = this.canvas.width
-    const h = this.canvas.height
-    // Arrows entirely off one side of the screen are skipped; zoomed in, that's most of them.
-    const off = (ax: number, ay: number, bx: number, by: number) =>
-      (ax < 0 && bx < 0) || (ax > w && bx > w) || (ay < 0 && by < 0) || (ay > h && by > h)
     ctx.beginPath()
-    let px = ox + chain[0] * s
-    let py = oy + chain[1] * s
-    let pen = false
+    ctx.moveTo(ox + chain[0] * s, oy + chain[1] * s)
     let i = 0
     for (; i < this.k; i++) {
       if (amp[i] * s < MIN_RADIUS_PX) break
-      const x = ox + chain[2 * i + 2] * s
-      const y = oy + chain[2 * i + 3] * s
-      if (off(px, py, x, y)) {
-        pen = false
-      } else {
-        if (!pen) ctx.moveTo(px, py)
-        ctx.lineTo(x, y)
-        pen = true
-      }
-      px = x
-      py = y
+      ctx.lineTo(ox + chain[2 * i + 2] * s, oy + chain[2 * i + 3] * s)
     }
     // The skipped sub-pixel arrows still add up; finish the chain at the tip.
-    if (i < this.k && !off(px, py, tipSx, tipSy)) {
-      if (!pen) ctx.moveTo(px, py)
-      ctx.lineTo(tipSx, tipSy)
-    }
+    if (i < this.k) ctx.lineTo(tipSx, tipSy)
     ctx.strokeStyle = this.colors.arrow
     ctx.lineWidth = (this.opts.arrowWidth ?? 1.25) * this.dpr
     ctx.stroke()
