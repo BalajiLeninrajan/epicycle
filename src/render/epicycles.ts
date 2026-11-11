@@ -74,6 +74,8 @@ const TAU = 2 * Math.PI
 const MIN_RADIUS_PX = 0.5
 /** Longest frame step; a stalled tab resumes instead of skipping ahead. */
 const MAX_DT = 0.1
+/** Circles smaller than this radius (screen px) aren't drawn. Amplitudes are sorted, so the rest are smaller still. */
+const MIN_CIRCLE_PX = 2
 /** Opacity steps for circles fading out by size (hideAbove). */
 const SIZE_BUCKETS = 4
 
@@ -532,7 +534,8 @@ export class EpicycleRenderer {
     const paths = Array.from({ length: SIZE_BUCKETS }, () => new Path2D())
     for (let i = 0; i < this.k; i++) {
       const r = amp[i] * s
-      if (r < MIN_RADIUS_PX) break
+      // Circles this small read as dots in a grey blob; skipping them saves most of the raster work zoomed in.
+      if (r < MIN_CIRCLE_PX) break
       const b = this.sizeBucket(r, w, h)
       if (b < 0) continue
       const x = ox + chain[2 * i] * s
@@ -559,6 +562,9 @@ export class EpicycleRenderer {
     const paths = Array.from({ length: SIZE_BUCKETS }, () => new Path2D())
     let px = ox + chain[0] * s
     let py = oy + chain[1] * s
+    // One connected polyline per opacity step: amplitudes are sorted, so each step is one run
+    // of the chain. A separate subpath per arrow made the browser cap every one of them.
+    let open = -1
     let i = 0
     for (; i < this.k; i++) {
       if (amp[i] * s < MIN_RADIUS_PX) break
@@ -566,18 +572,20 @@ export class EpicycleRenderer {
       const y = oy + chain[2 * i + 3] * s
       const b = this.sizeBucket(amp[i] * s, w, h)
       if (b >= 0) {
-        paths[b].moveTo(px, py)
+        if (b !== open) paths[b].moveTo(px, py)
         paths[b].lineTo(x, y)
       }
+      open = b
       px = x
       py = y
     }
     // The skipped sub-pixel arrows still add up; finish the chain at the tip.
     if (i < this.k) {
-      paths[0].moveTo(px, py)
+      if (open !== 0) paths[0].moveTo(px, py)
       paths[0].lineTo(tipSx, tipSy)
     }
     ctx.lineWidth = (this.opts.arrowWidth ?? 1.25) * this.dpr
+    ctx.lineJoin = 'bevel'
     this.strokeBuckets(paths, this.colors.arrow)
   }
 
