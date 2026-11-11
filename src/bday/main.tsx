@@ -41,14 +41,52 @@ const COEFFICIENT =
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<EpicycleRenderer | null>(null)
-  const dialogRef = useRef<HTMLDialogElement>(null)
+  const introRef = useRef<HTMLDivElement>(null)
+  const formulaRef = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState(1)
-  const [started, setStarted] = useState(false)
+  /** intro: the note is up. leaving: the equations are flying to the corner. started: playing. */
+  const [phase, setPhase] = useState<'intro' | 'leaving' | 'started'>('intro')
+  const started = phase === 'started'
 
-  useEffect(() => {
-    const d = dialogRef.current
-    if (d && !d.open) d.showModal()
-  }, [])
+  /** Fly each equation from the note to its place in the formula box, then start drawing. */
+  const play = () => {
+    if (phase !== 'intro') return
+    const from = [...(introRef.current?.querySelectorAll<HTMLElement>('.bd-eq') ?? [])]
+    const to = [...(formulaRef.current?.querySelectorAll<HTMLElement>('.bd-eq') ?? [])]
+    setPhase('leaving')
+    if (from.length !== to.length || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setPhase('started')
+      return
+    }
+    const clones = from.map((el, i) => {
+      const r0 = el.getBoundingClientRect()
+      const r1 = to[i].getBoundingClientRect()
+      const cs = getComputedStyle(el)
+      const clone = el.cloneNode(true) as HTMLElement
+      clone.classList.add('bd-flying')
+      Object.assign(clone.style, {
+        left: `${r0.left}px`,
+        top: `${r0.top}px`,
+        width: `${r0.width}px`,
+        fontSize: cs.fontSize,
+      })
+      document.body.appendChild(clone)
+      el.style.visibility = 'hidden'
+      const anim = clone.animate(
+        [
+          { transform: 'translate(0, 0) scale(1)' },
+          { transform: `translate(${r1.left - r0.left}px, ${r1.top - r0.top}px) scale(${r1.width / r0.width})` },
+        ],
+        { duration: 1200, delay: 250, easing: 'cubic-bezier(0.65, 0, 0.25, 1)', fill: 'forwards' },
+      )
+      return { clone, anim }
+    })
+    void Promise.all(clones.map((c) => c.anim.finished)).then(() => {
+      setPhase('started')
+      // Let the real equations show before the copies go, so nothing blinks.
+      requestAnimationFrame(() => requestAnimationFrame(() => clones.forEach((c) => c.clone.remove())))
+    })
+  }
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -131,26 +169,40 @@ function App() {
   return (
     <main class="bd-stage">
       <canvas ref={canvasRef} class="bd-canvas" role="img" aria-label="A drawing made by 1500 rotating circles" />
-      <div class="fd-formula bd-formula cn-r-card" aria-label="Fourier series formula">
-        <div dangerouslySetInnerHTML={{ __html: SERIES }} />
-        <div dangerouslySetInnerHTML={{ __html: COEFFICIENT }} />
+      <div
+        ref={formulaRef}
+        class={`fd-formula bd-formula cn-r-card bd-fade${phase === 'intro' ? ' is-hidden' : ''}`}
+        aria-label="Fourier series formula"
+      >
+        <div class={`bd-eq${started ? '' : ' is-waiting'}`} dangerouslySetInnerHTML={{ __html: SERIES }} />
+        <div class={`bd-eq${started ? '' : ' is-waiting'}`} dangerouslySetInnerHTML={{ __html: COEFFICIENT }} />
         <span class="cn-meta">{CIRCLES} circles, largest |c<sub>n</sub>| first</span>
       </div>
-      <dialog ref={dialogRef} class="modal bd-intro" onClose={() => setStarted(true)} aria-labelledby="bd-title">
-        <h1 id="bd-title">அப்பா,</h1>
-        <p>This is a complex Fourier series.</p>
-        <div class="bd-math">
-          <div dangerouslySetInnerHTML={{ __html: SERIES }} />
-          <div dangerouslySetInnerHTML={{ __html: COEFFICIENT }} />
-        </div>
-        <p>I can only understand it because of the education you worked so hard to give me.</p>
-        <form method="dialog" class="bd-intro-actions">
-          <button type="submit" class="btn btn-primary" autofocus>
-            Play
-          </button>
-        </form>
-      </dialog>
-      <label class="bd-zoom cn-r-card">
+      {!started && (
+        <>
+          <div class={`bd-backdrop${phase === 'leaving' ? ' is-leaving' : ''}`} />
+          <div
+            ref={introRef}
+            class={`modal bd-intro${phase === 'leaving' ? ' is-leaving' : ''}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label="A note"
+          >
+            <p>This is a complex Fourier series.</p>
+            <div class="bd-math">
+              <div class="bd-eq" dangerouslySetInnerHTML={{ __html: SERIES }} />
+              <div class="bd-eq" dangerouslySetInnerHTML={{ __html: COEFFICIENT }} />
+            </div>
+            <p>I can only understand it because of the education you worked so hard to give me. Thank you, <span class="bd-ta">அப்பா</span>.</p>
+            <div class="bd-intro-actions">
+              <button type="button" class="btn btn-primary" autofocus onClick={play}>
+                Play
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+      <label class={`bd-zoom cn-r-card bd-fade${started ? '' : ' is-hidden'}`}>
         <span class="cn-meta">Zoom</span>
         <input
           type="range"

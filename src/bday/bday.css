@@ -31,11 +31,38 @@ body { background: var(--fd-bg); overflow: hidden; }
   .bd-zoom .fd-range { flex: 1; width: auto; }
 }
 
-/* Opening card */
-.bd-intro { padding: var(--space-5); width: min(560px, calc(100vw - 32px)); }
-.bd-intro h1 { margin: 0 0 var(--space-3); font-size: 1.6rem; }
+/* Opening note. A plain overlay, not <dialog>: the top layer would cover the flying equations. */
+.bd-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: color-mix(in srgb, var(--crust) 70%, transparent);
+  transition: opacity 600ms ease;
+}
+.bd-intro { padding: var(--space-5); width: min(560px, calc(100vw - 32px)); transition: opacity 450ms ease; }
 .bd-intro p { margin: 0 0 var(--space-3); line-height: 1.55; }
 .bd-math { display: grid; gap: var(--space-2); margin: var(--space-2) 0 var(--space-4); font-size: 1.15rem; }
-.bd-math math { margin: 0; }
 .bd-intro-actions { display: flex; justify-content: flex-end; margin-top: var(--space-4); }
+.bd-intro.is-leaving, .bd-backdrop.is-leaving { opacity: 0; pointer-events: none; }
+
+/* Equations size to their content, so the flight can scale one box onto the other. */
+.bd-eq { width: fit-content; }
+.bd-eq math { margin: 0; text-align: left; }
+.bd-eq.is-waiting { visibility: hidden; }
+.bd-flying {
+  position: fixed;
+  margin: 0;
+  z-index: 100;
+  transform-origin: 0 0;
+  pointer-events: none;
+  color: var(--text);
+}
+
+/* The formula box and zoom fade in as the equations arrive. */
+.bd-fade { transition: opacity 900ms ease 300ms; }
+.bd-fade.is-hidden { opacity: 0; pointer-events: none; }
+
 .bd-zoom-value + .bd-zoom-value { min-width: 9ch; }
+
+/* Same face as the drawing's text. */
+.bd-ta { font-family: "Baloo Thambi 2", "Noto Sans Tamil", sans-serif; font-weight: 600; font-size: 1.15em; }
