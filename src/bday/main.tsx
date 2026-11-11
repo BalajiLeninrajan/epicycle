@@ -20,6 +20,8 @@ const SLIDER_STEPS = 1000
 /** Camera cap and dead zone for the smooth follow (CSS px per second, fraction of the short side). */
 const CAM_MAX_SPEED = 700
 const CAM_DEAD_ZONE = 0.12
+/** Line width in CSS px: thin, and thinner still on phones where the drawing is small. */
+const lineWidthFor = () => (Math.min(innerWidth, innerHeight) < 640 ? 0.5 : 1)
 
 const sampled = resample({ points: Float32Array.from(drawing.points), jump: Uint8Array.from(drawing.jump) }, SAMPLES)
 const coeffs = computeCoeffs(sampled)
@@ -104,11 +106,17 @@ function App() {
       followAmount: 0,
       camMaxSpeed: CAM_MAX_SPEED,
       camDeadZone: CAM_DEAD_ZONE,
+      lineWidth: lineWidthFor(),
       playing: false,
     })
     r.setData(coeffs, sampled)
     rendererRef.current = r
-    return () => r.dispose()
+    const onResize = () => r.setOptions({ lineWidth: lineWidthFor() })
+    addEventListener('resize', onResize)
+    return () => {
+      removeEventListener('resize', onResize)
+      r.dispose()
+    }
   }, [])
 
   useEffect(() => {
