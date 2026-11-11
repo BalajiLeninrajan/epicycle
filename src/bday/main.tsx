@@ -130,26 +130,23 @@ function App() {
   const slider = Math.round((Math.log(zoom) / Math.log(MAX_ZOOM)) * SLIDER_STEPS)
   return (
     <main class="bd-stage">
-      <canvas ref={canvasRef} class="bd-canvas" role="img" aria-label="Happy Birthday அப்பா, drawn by 1500 rotating circles" />
+      <canvas ref={canvasRef} class="bd-canvas" role="img" aria-label="A drawing made by 1500 rotating circles" />
       <div class="fd-formula bd-formula cn-r-card" aria-label="Fourier series formula">
         <div dangerouslySetInnerHTML={{ __html: SERIES }} />
         <div dangerouslySetInnerHTML={{ __html: COEFFICIENT }} />
         <span class="cn-meta">{CIRCLES} circles, largest |c<sub>n</sub>| first</span>
       </div>
       <dialog ref={dialogRef} class="modal bd-intro" onClose={() => setStarted(true)} aria-labelledby="bd-title">
-        <h1 id="bd-title">Happy Birthday, அப்பா</h1>
-        <p>
-          This is a complex Fourier series. {CIRCLES} circles, each spinning at its own speed, add up to a single line, and
-          that line draws the two of us.
-        </p>
+        <h1 id="bd-title">அப்பா,</h1>
+        <p>This is a complex Fourier series.</p>
         <div class="bd-math">
           <div dangerouslySetInnerHTML={{ __html: SERIES }} />
           <div dangerouslySetInnerHTML={{ __html: COEFFICIENT }} />
         </div>
-        <p>I can only understand math like this because of the education you worked so hard to give me. Thank you, அப்பா.</p>
+        <p>I can only understand it because of the education you worked so hard to give me.</p>
         <form method="dialog" class="bd-intro-actions">
           <button type="submit" class="btn btn-primary" autofocus>
-            Watch it draw
+            Play
           </button>
         </form>
       </dialog>
