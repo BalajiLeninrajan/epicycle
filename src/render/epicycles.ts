@@ -70,9 +70,7 @@ const MAX_DT = 0.1
 /** Past this many screen pixels between stored trail samples, the trail near the tip is evaluated directly. */
 const FINE_SPACING_PX = 3
 /** Screen pixels between points of the directly evaluated trail. */
-const FINE_STEP_PX = 8
-/** How much of the screen diagonal the fine trail covers on each side of the tip. */
-const FINE_REACH = 0.75
+const FINE_STEP_PX = 3
 
 /**
  * Canvas 2D epicycle animation. Colors come from CSS custom properties on the canvas:
@@ -98,15 +96,6 @@ export class EpicycleRenderer {
   /** Scratch for the fine trail: per-term phasors and per-step rotations. */
   private fineZ = new Float64Array(0)
   private fineR = new Float64Array(0)
-  /**
-   * Points of the series at t = j * fineDt for j in [fineJ0, fineJ0 + fineN), in world units.
-   * The tip moves a few pixels a frame, so most frames only add a point or two.
-   */
-  private fineDt = 0
-  private fineJ0 = 0
-  private fineN = 0
-  private fineX = new Float64Array(0)
-  private fineY = new Float64Array(0)
   private chain = new Float64Array(2)
   /** In [0, 1]; equals 1 only after playOnce finishes. */
   private t = 0
@@ -254,7 +243,6 @@ export class EpicycleRenderer {
       len += Math.hypot(trail.re[j] - trail.re[i], trail.im[j] - trail.im[i])
     }
     this.trailLength = len
-    this.fineN = 0
     this.layerKey = ''
     if (this.chain.length < 2 * (k + 1)) this.chain = new Float64Array(2 * (k + 1))
   }
@@ -481,7 +469,7 @@ export class EpicycleRenderer {
     let dn = 0
     let window = 0
     if (spacing > FINE_SPACING_PX && this.trailLength > 0) {
-      window = (FINE_REACH * Math.hypot(this.canvas.width, this.canvas.height)) / (view.s * this.trailLength)
+      window = Math.hypot(this.canvas.width, this.canvas.height) / (view.s * this.trailLength)
       dn = Math.min(Math.floor(n / 4), Math.ceil(window * n) + 1)
       window = Math.min(window, dn / n)
     }
@@ -522,7 +510,6 @@ export class EpicycleRenderer {
     const B = FADE_BUCKETS
     // Behind the tip, newest color. Before the first loop has gone round, nothing exists before t = 0.
     const behind0 = this.loops === 0 ? Math.max(0, t - window) : t - window
-    this.fillFine(view, t - window, t + window)
     if (t > behind0) this.strokeFine(view, behind0, t, this.fadeColors[B - 1], this.fadeJumpColors[B - 1])
     // Ahead of the tip: what the previous loop drew there, if it's still on screen.
     if (aheadTo >= first && aheadFrom >= 0) {
@@ -532,55 +519,21 @@ export class EpicycleRenderer {
   }
 
   /**
-   * Make sure the fine cache holds every grid point in [t0, t1]. The grid step follows the zoom
-   * (about FINE_STEP_PX on screen) but is only reset when it's off by more than about 2x, so
-   * zooming doesn't recompute every frame.
+   * The series evaluated directly for t in [t0, t1], every few screen pixels, using one rotation
+   * per term per step instead of trig per point.
    */
-  private fillFine(view: View, t0: number, t1: number): void {
-    const want = FINE_STEP_PX / (this.trailLength * view.s)
-    if (!(this.fineDt > 0) || this.fineDt > want * 1.6 || this.fineDt < want / 2.5) {
-      this.fineDt = want
-      this.fineN = 0
-    }
-    const dt = this.fineDt
-    const ja = Math.floor(t0 / dt)
-    const jb = Math.ceil(t1 / dt)
-    const count = jb - ja + 1
-    if (count > 20000) return
-    const xs = count <= this.fineX.length ? this.fineX : new Float64Array(count * 2)
-    const ys = count <= this.fineY.length ? this.fineY : new Float64Array(count * 2)
-    // Keep the overlap with what's cached, shifted to the new start.
-    const o0 = Math.max(ja, this.fineJ0)
-    const o1 = Math.min(jb, this.fineJ0 + this.fineN - 1)
-    if (this.fineN > 0 && o1 >= o0) {
-      const tx = Float64Array.from(this.fineX.subarray(o0 - this.fineJ0, o1 - this.fineJ0 + 1))
-      const ty = Float64Array.from(this.fineY.subarray(o0 - this.fineJ0, o1 - this.fineJ0 + 1))
-      xs.set(tx, o0 - ja)
-      ys.set(ty, o0 - ja)
-      if (o0 > ja) this.evalRange(ja, o0 - 1, ja, xs, ys)
-      if (o1 < jb) this.evalRange(o1 + 1, jb, ja, xs, ys)
-    } else {
-      this.evalRange(ja, jb, ja, xs, ys)
-    }
-    this.fineX = xs
-    this.fineY = ys
-    this.fineJ0 = ja
-    this.fineN = count
-  }
-
-  /** Series at t = j * fineDt for j in [j0, j1] into xs/ys at j - base; one trig per term, then rotations. */
-  private evalRange(j0: number, j1: number, base: number, xs: Float64Array, ys: Float64Array): void {
+  private strokeFine(view: View, t0: number, t1: number, line: string | undefined, jumps: string | undefined): void {
     const coeffs = this.coeffs
-    if (coeffs === null) return
+    if (coeffs === null || t1 <= t0) return
     const k = this.k
-    const dt = this.fineDt
+    const steps = Math.min(4000, Math.max(2, Math.ceil(((t1 - t0) * this.trailLength * view.s) / FINE_STEP_PX)))
+    const dt = (t1 - t0) / steps
     if (this.fineZ.length < 2 * k) {
       this.fineZ = new Float64Array(2 * k)
       this.fineR = new Float64Array(2 * k)
     }
     const z = this.fineZ
     const r = this.fineR
-    const t0 = j0 * dt
     for (let i = 0; i < k; i++) {
       const f = TAU * coeffs.freq[i]
       const a = f * t0
@@ -591,7 +544,13 @@ export class EpicycleRenderer {
       r[2 * i] = Math.cos(f * dt)
       r[2 * i + 1] = Math.sin(f * dt)
     }
-    for (let j = j0; j <= j1; j++) {
+    const { ox, oy, s } = view
+    const linePath = new Path2D()
+    const jumpPath = new Path2D()
+    const n = this.trailJump.length
+    let px = 0
+    let py = 0
+    for (let j = 0; j <= steps; j++) {
       let x = 0
       let y = 0
       for (let i = 0; i < k; i++) {
@@ -602,40 +561,18 @@ export class EpicycleRenderer {
         z[2 * i] = zr * r[2 * i] - zi * r[2 * i + 1]
         z[2 * i + 1] = zr * r[2 * i + 1] + zi * r[2 * i]
       }
-      xs[j - base] = x
-      ys[j - base] = y
-    }
-  }
-
-  /** The cached fine trail for t in [t0, t1]; ends exactly at t0/t1 (the tip end is joined to the tip). */
-  private strokeFine(view: View, t0: number, t1: number, line: string | undefined, jumps: string | undefined): void {
-    if (t1 <= t0 || this.fineN === 0) return
-    const dt = this.fineDt
-    const ja = Math.max(this.fineJ0, Math.ceil(t0 / dt))
-    const jb = Math.min(this.fineJ0 + this.fineN - 1, Math.floor(t1 / dt))
-    if (jb < ja) return
-    const { ox, oy, s } = view
-    const linePath = new Path2D()
-    const jumpPath = new Path2D()
-    const n = this.trailJump.length
-    const tipX = ox + this.chain[2 * this.k] * s
-    const tipY = oy + this.chain[2 * this.k + 1] * s
-    // The tip sits at this.t, which is one end of the range.
-    const tipAtEnd = Math.abs(t1 - this.t) < Math.abs(t0 - this.t)
-    let px = tipAtEnd ? Number.NaN : tipX
-    let py = tipAtEnd ? Number.NaN : tipY
-    const seg = (x: number, y: number, tt: number) => {
-      if (!Number.isNaN(px)) {
+      const sx = ox + x * s
+      const sy = oy + y * s
+      if (j > 0) {
+        const tt = t0 + (j - 0.5) * dt
         const idx = ((Math.floor(tt * n) % n) + n) % n
         const p = n > 0 && this.trailJump[idx] === 1 ? jumpPath : linePath
         p.moveTo(px, py)
-        p.lineTo(x, y)
+        p.lineTo(sx, sy)
       }
-      px = x
-      py = y
+      px = sx
+      py = sy
     }
-    for (let j = ja; j <= jb; j++) seg(ox + this.fineX[j - this.fineJ0] * s, oy + this.fineY[j - this.fineJ0] * s, (j - 0.5) * dt)
-    if (tipAtEnd) seg(tipX, tipY, t1)
     this.ctx.strokeStyle = jumps ?? this.jumpColor
     this.ctx.stroke(jumpPath)
     this.ctx.strokeStyle = line ?? this.colors.trail
@@ -702,21 +639,6 @@ export class EpicycleRenderer {
       const dx = Math.max(x, w - x)
       const dy = Math.max(y, h - y)
       if (dx * dx + dy * dy < r * r) continue
-      // A circle much bigger than the screen only shows a short arc; drawing all of it makes the
-      // browser tessellate a circle tens of thousands of pixels around.
-      const cx = x - w / 2
-      const cy = y - h / 2
-      const d = Math.hypot(cx, cy)
-      const R = Math.hypot(w, h) / 2
-      if (r > 2 * R && d > 0) {
-        if (Math.abs(d - r) > R) continue
-        const cosA = (d * d + r * r - R * R) / (2 * d * r)
-        const half = Math.acos(Math.max(-1, Math.min(1, cosA)))
-        const mid = Math.atan2(-cy, -cx)
-        ctx.moveTo(x + r * Math.cos(mid - half), y + r * Math.sin(mid - half))
-        ctx.arc(x, y, r, mid - half, mid + half)
-        continue
-      }
       ctx.moveTo(x + r, y)
       ctx.arc(x, y, r, 0, TAU)
     }
