@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FIT_MARGIN, fitScale, newCamera, smoothing, stepCamera, viewTransform, type View } from './camera'
+import { FIT_MARGIN, fitScale, newCamera, newFollowCam, smoothing, stepCamera, stepFollow, viewTransform, type View } from './camera'
 
 describe('fitScale', () => {
   it('fits the unit disk inside the short side with a margin', () => {
@@ -79,5 +79,53 @@ describe('stepCamera', () => {
     expect(smoothing(0, 4)).toBe(0)
     expect(smoothing(-1, 4)).toBe(0)
     expect(smoothing(10, 4)).toBeGreaterThan(0.999)
+  })
+})
+
+describe('stepFollow', () => {
+  const lim = { deadZone: 50, maxSpeed: 700, catchUp: 3 }
+  const s = 100 // screen px per world unit
+  const dt = 1 / 60
+
+  it('holds still while the target is inside the dead zone', () => {
+    const fc = newFollowCam()
+    for (let i = 0; i < 60; i++) expect(stepFollow(fc, 0.3, 0.2, s, dt, lim)).toBe(true)
+    expect(fc).toEqual(newFollowCam())
+  })
+
+  it('comes to rest inside the dead zone without passing the target', () => {
+    const fc = newFollowCam()
+    let rest = false
+    for (let i = 0; i < 600; i++) {
+      rest = stepFollow(fc, 3, 0, s, dt, lim)
+      expect(fc.x).toBeLessThan(3)
+    }
+    expect(rest).toBe(true)
+    expect((3 - fc.x) * s).toBeLessThanOrEqual(lim.deadZone)
+    expect(fc.vx).toBe(0)
+  })
+
+  it('never moves faster than the cap allows for its distance', () => {
+    const fc = newFollowCam()
+    for (let i = 0; i < 120; i++) {
+      const dist = Math.hypot(5 - fc.x, -2 - fc.y) * s
+      stepFollow(fc, 5, -2, s, dt, lim)
+      expect(Math.hypot(fc.vx, fc.vy) * s).toBeLessThanOrEqual(lim.maxSpeed + lim.catchUp * dist + 1e-6)
+    }
+  })
+
+  it('catches up from far behind in about a second', () => {
+    const fc = newFollowCam()
+    // 8000 px away, as after zooming in fast.
+    for (let i = 0; i < 90; i++) stepFollow(fc, 80, 0, s, dt, lim)
+    expect((80 - fc.x) * s).toBeLessThan(400)
+  })
+
+  it('without a dead zone it settles on the target', () => {
+    const fc = newFollowCam()
+    let rest = false
+    for (let i = 0; i < 600 && !rest; i++) rest = stepFollow(fc, 1, 1, s, dt, { ...lim, deadZone: 0 })
+    expect(rest).toBe(true)
+    expect(Math.hypot(1 - fc.x, 1 - fc.y) * s).toBeLessThan(1)
   })
 })

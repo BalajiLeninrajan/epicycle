@@ -58,3 +58,72 @@ export function viewTransform(width: number, height: number, cam: Camera, tipX: 
   out.oy = height / 2 - cam.follow * tipY * s
   return out
 }
+
+/**
+ * Smooth follow state: the world point at the screen center and its velocity (world units per
+ * second). Locking the view onto the tip shakes the whole drawing on every turn of the tip; this
+ * drifts after it instead.
+ */
+export interface FollowCam {
+  x: number
+  y: number
+  vx: number
+  vy: number
+}
+
+export function newFollowCam(): FollowCam {
+  return { x: 0, y: 0, vx: 0, vy: 0 }
+}
+
+export interface FollowLimits {
+  /** The camera holds still while the target is within this many screen px of the center. */
+  deadZone: number
+  /** Top speed in screen px per second, */
+  maxSpeed: number
+  /** plus this much per px the target is away, so a camera that fell behind catches up. */
+  catchUp: number
+}
+
+/** Rate (1/s) at which the camera closes the distance past the dead zone, and eases its velocity. */
+const FOLLOW_RATE = 4
+const FOLLOW_ACCEL_RATE = 6
+
+/**
+ * Moves fc toward the target (tx, ty) in world units, at scale s screen px per unit. The camera
+ * eases its velocity, never moves faster than the limits allow, and stops inside the dead zone.
+ * Returns true when it's at rest.
+ */
+export function stepFollow(fc: FollowCam, tx: number, ty: number, s: number, dt: number, lim: FollowLimits): boolean {
+  if (!(s > 0)) return true
+  const dx = (tx - fc.x) * s
+  const dy = (ty - fc.y) * s
+  const dist = Math.hypot(dx, dy)
+  const max = lim.maxSpeed + lim.catchUp * dist
+  let wx = 0
+  let wy = 0
+  if (dist > lim.deadZone) {
+    const want = Math.min(max, (dist - lim.deadZone) * FOLLOW_RATE)
+    wx = (dx / dist) * want
+    wy = (dy / dist) * want
+  }
+  if (dt > 0) {
+    const a = smoothing(dt, FOLLOW_ACCEL_RATE)
+    let vx = fc.vx * s + (wx - fc.vx * s) * a
+    let vy = fc.vy * s + (wy - fc.vy * s) * a
+    const sp = Math.hypot(vx, vy)
+    if (sp > max) {
+      vx *= max / sp
+      vy *= max / sp
+    }
+    fc.vx = vx / s
+    fc.vy = vy / s
+    fc.x += fc.vx * dt
+    fc.y += fc.vy * dt
+  }
+  const resting = Math.hypot(fc.vx, fc.vy) * s < 0.5 && dist <= lim.deadZone + 0.5
+  if (resting) {
+    fc.vx = 0
+    fc.vy = 0
+  }
+  return resting
+}

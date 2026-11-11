@@ -24,7 +24,7 @@ SVG uploads skip straight to the "One line" step. Stipple mode replaces the line
 The panel follows what you're doing:
 
 - **Picture**: subject only or keep the background, mask editing, the style (Lines, Edges or Dots), Detail, the outline, and a hold-to-see button that overlays the extracted strokes.
-- **Animation**: circles (1 up to the sample count, log scale; around 1000 is enough for a face), loop duration, a trail that fades like the video (Fade speed sets how long the line lasts, from four loops down to a twentieth of one) or stays up in full, which of circles, arrows and the formula to show, follow the tip, and line width.
+- **Animation**: circles (1 up to the sample count, log scale; around 1000 is enough for a face), loop duration, a trail that fades like the video (Fade speed sets how long the line lasts, from four loops down to a twentieth of one) or stays up in full, which of circles, arrows and the formula to show, follow the tip, and line width. Following the tip, the camera drifts after it instead of locking on, time slows to 1/zoom so the tip stays in view, and circles bigger than half the screen fade out.
 - **Export**: a PNG of the finished drawing, a WebM of one loop, the single-line path as SVG (handy for pen plotters), or a share link.
 - **Fine-tuning**, folded away: ink threshold, shortest stroke and simplification (each follows Detail until you move it), and the sample count.
 

@@ -1,6 +1,6 @@
 import { evalChain, reconstruct } from '../fourier/epicycles'
 import type { Coeffs, SampledPath } from '../pipeline/types'
-import { newCamera, stepCamera, viewTransform, type View } from './camera'
+import { fitScale, newCamera, newFollowCam, stepCamera, stepFollow, viewTransform, type View } from './camera'
 import { mixRgb, parseRgb, readThemeColors, type ThemeColors } from './theme'
 import {
   FADE_BUCKETS,
@@ -54,6 +54,20 @@ const TAU = 2 * Math.PI
 const MIN_RADIUS_PX = 0.5
 /** Longest frame step; a stalled tab resumes instead of skipping ahead. */
 const MAX_DT = 0.1
+/** Circles smaller than this radius (screen px) aren't drawn; they read as dots in a grey blob. */
+const MIN_CIRCLE_PX = 2
+/**
+ * Circles and arrows wider than this fraction of the short side fade out, gone at twice that.
+ * Zoomed in, that drops the huge arcs from early in the chain; at rest even the biggest circle
+ * is well under it.
+ */
+const HIDE_ABOVE = 0.5
+/** Opacity steps for that fade. */
+const SIZE_BUCKETS = 4
+/** Smooth follow: dead zone (fraction of the short side), top speed (CSS px/s), catch-up (1/s). */
+const FOLLOW_DEAD_ZONE = 0.12
+const FOLLOW_MAX_SPEED = 700
+const FOLLOW_CATCH_UP = 3
 
 /**
  * Canvas 2D epicycle animation. Colors come from CSS custom properties on the canvas:
@@ -91,6 +105,8 @@ export class EpicycleRenderer {
   private loops = 0
   private dprQuery: MediaQueryList | null = null
   private readonly cam = newCamera()
+  /** Where the smooth follow camera looks; see stepFollow. */
+  private readonly followCam = newFollowCam()
   private readonly view: View = { ox: 0, oy: 0, s: 1 }
   private readonly clip: TraceClip = { width: 0, height: 0, margin: 0 }
   /**
@@ -224,7 +240,10 @@ export class EpicycleRenderer {
     this.lastTs = ts
     const active = this.coeffs !== null
     if (active && this.opts.playing) {
-      this.t += dt / this.opts.durationSec
+      // Following the tip, time runs at 1/zoom so the tip crosses the screen no faster than it
+      // does zoomed out and the follow camera can keep it in view. Recording plays at full speed.
+      const speed = this.onceDone === null ? 1 / this.cam.zoom : 1
+      this.t += (dt * speed) / this.opts.durationSec
       if (this.t >= 1) {
         if (this.onceDone !== null) {
           this.t = 1
@@ -337,7 +356,7 @@ export class EpicycleRenderer {
     const tipX = chain[2 * k]
     const tipY = chain[2 * k + 1]
     this.camSettled = stepCamera(this.cam, this.opts.followTip, this.opts.followZoom, dt)
-    const view = viewTransform(w, h, this.cam, tipX, tipY, this.view)
+    const view = this.followView(w, h, tipX, tipY, dt)
     const tipSx = view.ox + tipX * view.s
     const tipSy = view.oy + tipY * view.s
 
@@ -349,6 +368,38 @@ export class EpicycleRenderer {
     ctx.lineJoin = 'round'
     if (this.opts.showCircles) this.drawCircles(coeffs, view, w, h)
     if (this.opts.showArrows) this.drawArrows(coeffs, view, tipSx, tipSy)
+  }
+
+  /**
+   * At rest the drawing is centered. Otherwise the view centers on the smooth follow camera,
+   * which drifts after follow * tip. Recording keeps the camera locked on the tip: it plays at
+   * full speed, faster than the smooth camera can follow zoomed in.
+   */
+  private followView(w: number, h: number, tipX: number, tipY: number, dt: number): View {
+    const fc = this.followCam
+    if (this.onceDone !== null || (!this.opts.followTip && this.cam.follow === 0 && fc.x === 0 && fc.y === 0)) {
+      fc.x = this.cam.follow * tipX
+      fc.y = this.cam.follow * tipY
+      fc.vx = 0
+      fc.vy = 0
+      return viewTransform(w, h, this.cam, tipX, tipY, this.view)
+    }
+    const s = fitScale(w, h) * this.cam.zoom
+    const rest = stepFollow(fc, this.cam.follow * tipX, this.cam.follow * tipY, s, dt, {
+      deadZone: this.opts.followTip ? FOLLOW_DEAD_ZONE * Math.min(w, h) : 0,
+      maxSpeed: FOLLOW_MAX_SPEED * this.dpr,
+      catchUp: FOLLOW_CATCH_UP,
+    })
+    // Back at the center after following: snap the last half pixel so the resting view is exact.
+    if (rest && !this.opts.followTip && this.cam.follow === 0) {
+      fc.x = 0
+      fc.y = 0
+    }
+    this.camSettled = this.camSettled && rest
+    this.view.s = s
+    this.view.ox = w / 2 - fc.x * s
+    this.view.oy = h / 2 - fc.y * s
+    return this.view
   }
 
   private drawTrail(view: View, tipSx: number, tipSy: number): void {
@@ -439,15 +490,34 @@ export class EpicycleRenderer {
     ctx.stroke(linePath)
   }
 
-  private drawCircles(coeffs: Coeffs, view: View, w: number, h: number): void {
+  /** Opacity step (0 = fully shown) for a circle or arrow of screen radius r, or -1 when it's hidden. */
+  private sizeBucket(r: number, w: number, h: number): number {
+    const limit = HIDE_ABOVE * Math.min(w, h)
+    if (r <= limit) return 0
+    const b = Math.floor(((r - limit) / limit) * SIZE_BUCKETS)
+    return b >= SIZE_BUCKETS ? -1 : b
+  }
+
+  private strokeBuckets(paths: Path2D[], color: string): void {
     const ctx = this.ctx
+    ctx.strokeStyle = color
+    for (let b = 0; b < paths.length; b++) {
+      ctx.globalAlpha = 1 - b / SIZE_BUCKETS
+      ctx.stroke(paths[b])
+    }
+    ctx.globalAlpha = 1
+  }
+
+  private drawCircles(coeffs: Coeffs, view: View, w: number, h: number): void {
     const chain = this.chain
     const amp = coeffs.amp
     const { ox, oy, s } = view
-    ctx.beginPath()
+    const paths = Array.from({ length: SIZE_BUCKETS }, () => new Path2D())
     for (let i = 0; i < this.k; i++) {
       const r = amp[i] * s
-      if (r < MIN_RADIUS_PX) break
+      if (r < MIN_CIRCLE_PX) break
+      const b = this.sizeBucket(r, w, h)
+      if (b < 0) continue
       const x = ox + chain[2 * i] * s
       const y = oy + chain[2 * i + 1] * s
       if (x + r < 0 || x - r > w || y + r < 0 || y - r > h) continue
@@ -455,30 +525,47 @@ export class EpicycleRenderer {
       const dx = Math.max(x, w - x)
       const dy = Math.max(y, h - y)
       if (dx * dx + dy * dy < r * r) continue
-      ctx.moveTo(x + r, y)
-      ctx.arc(x, y, r, 0, TAU)
+      paths[b].moveTo(x + r, y)
+      paths[b].arc(x, y, r, 0, TAU)
     }
-    ctx.strokeStyle = this.colors.circle
-    ctx.lineWidth = this.dpr
-    ctx.stroke()
+    this.ctx.lineWidth = this.dpr
+    this.strokeBuckets(paths, this.colors.circle)
   }
 
   private drawArrows(coeffs: Coeffs, view: View, tipSx: number, tipSy: number): void {
-    const ctx = this.ctx
     const chain = this.chain
     const amp = coeffs.amp
     const { ox, oy, s } = view
-    ctx.beginPath()
-    ctx.moveTo(ox + chain[0] * s, oy + chain[1] * s)
+    const w = this.canvas.width
+    const h = this.canvas.height
+    const paths = Array.from({ length: SIZE_BUCKETS }, () => new Path2D())
+    let px = ox + chain[0] * s
+    let py = oy + chain[1] * s
+    // One connected polyline per opacity step: amplitudes are sorted, so each step is one run of
+    // the chain. A subpath per arrow would make the browser cap every one of them.
+    let open = -1
     let i = 0
     for (; i < this.k; i++) {
       if (amp[i] * s < MIN_RADIUS_PX) break
-      ctx.lineTo(ox + chain[2 * i + 2] * s, oy + chain[2 * i + 3] * s)
+      const x = ox + chain[2 * i + 2] * s
+      const y = oy + chain[2 * i + 3] * s
+      const b = this.sizeBucket(amp[i] * s, w, h)
+      if (b >= 0) {
+        if (b !== open) paths[b].moveTo(px, py)
+        paths[b].lineTo(x, y)
+      }
+      open = b
+      px = x
+      py = y
     }
     // The skipped sub-pixel arrows still add up; finish the chain at the tip.
-    if (i < this.k) ctx.lineTo(tipSx, tipSy)
-    ctx.strokeStyle = this.colors.arrow
-    ctx.lineWidth = 1.25 * this.dpr
-    ctx.stroke()
+    if (i < this.k) {
+      if (open !== 0) paths[0].moveTo(px, py)
+      paths[0].lineTo(tipSx, tipSy)
+    }
+    this.ctx.lineWidth = 1.25 * this.dpr
+    this.ctx.lineJoin = 'bevel'
+    this.strokeBuckets(paths, this.colors.arrow)
   }
+
 }
