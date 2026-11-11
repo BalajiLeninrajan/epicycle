@@ -209,7 +209,7 @@ function App() {
               <div class="bd-eq" dangerouslySetInnerHTML={{ __html: SERIES }} />
               <div class="bd-eq" dangerouslySetInnerHTML={{ __html: COEFFICIENT }} />
             </div>
-            <p class="bd-ta-p" lang="ta">நீங்கள் கஷ்டப்பட்டு எனக்குக் கொடுத்த கல்வியால்தான் இதை என்னால் புரிந்துகொள்ள முடிகிறது. நன்றி, அப்பா.</p>
+            <p class="bd-ta-p" lang="ta">நீங்க கஷ்டப்பட்டு என்னைப் படிக்க வெச்சதுனாலதான் இதெல்லாம் எனக்குப் புரியுது. நன்றி, அப்பா.</p>
             <div class="bd-intro-actions">
               <button type="button" class="btn btn-primary" autofocus onClick={play}>
                 Play
