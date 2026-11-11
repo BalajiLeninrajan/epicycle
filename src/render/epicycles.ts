@@ -42,6 +42,8 @@ export interface RenderOptions {
    */
   camMaxSpeed?: number
   camDeadZone?: number
+  /** Arrow line width in CSS px (default 1.25). */
+  arrowWidth?: number
   lineWidth: number
   playing: boolean
 }
@@ -532,7 +534,7 @@ export class EpicycleRenderer {
     // The skipped sub-pixel arrows still add up; finish the chain at the tip.
     if (i < this.k) ctx.lineTo(tipSx, tipSy)
     ctx.strokeStyle = this.colors.arrow
-    ctx.lineWidth = 1.25 * this.dpr
+    ctx.lineWidth = (this.opts.arrowWidth ?? 1.25) * this.dpr
     ctx.stroke()
   }
 }

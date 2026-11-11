@@ -21,7 +21,10 @@ const SLIDER_STEPS = 1000
 const CAM_MAX_SPEED = 700
 const CAM_DEAD_ZONE = 0.12
 /** Line width in CSS px: thin, and thinner still on phones where the drawing is small. */
-const lineWidthFor = () => (Math.min(innerWidth, innerHeight) < 640 ? 0.5 : 1)
+const isSmall = () => Math.min(innerWidth, innerHeight) < 640
+const lineWidthFor = () => (isSmall() ? 0.5 : 1)
+/** Arrow width in CSS px; the renderer's default is 1.25. */
+const arrowWidthFor = () => (isSmall() ? 0.5 : 1.25)
 
 const sampled = resample({ points: Float32Array.from(drawing.points), jump: Uint8Array.from(drawing.jump) }, SAMPLES)
 const coeffs = computeCoeffs(sampled)
@@ -107,11 +110,12 @@ function App() {
       camMaxSpeed: CAM_MAX_SPEED,
       camDeadZone: CAM_DEAD_ZONE,
       lineWidth: lineWidthFor(),
+      arrowWidth: arrowWidthFor(),
       playing: false,
     })
     r.setData(coeffs, sampled)
     rendererRef.current = r
-    const onResize = () => r.setOptions({ lineWidth: lineWidthFor() })
+    const onResize = () => r.setOptions({ lineWidth: lineWidthFor(), arrowWidth: arrowWidthFor() })
     addEventListener('resize', onResize)
     return () => {
       removeEventListener('resize', onResize)
