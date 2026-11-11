@@ -44,6 +44,11 @@ export interface RenderOptions {
   camDeadZone?: number
   /** Arrow line width in CSS px (default 1.25). */
   arrowWidth?: number
+  /**
+   * Circles and arrows with a screen radius past this fraction of the short side fade out,
+   * gone at twice that. Zoomed in, that hides the big ones earlier in the chain.
+   */
+  hideAbove?: number
   lineWidth: number
   playing: boolean
 }
@@ -67,6 +72,8 @@ const TAU = 2 * Math.PI
 const MIN_RADIUS_PX = 0.5
 /** Longest frame step; a stalled tab resumes instead of skipping ahead. */
 const MAX_DT = 0.1
+/** Opacity steps for circles fading out by size (hideAbove). */
+const SIZE_BUCKETS = 4
 
 /**
  * Canvas 2D epicycle animation. Colors come from CSS custom properties on the canvas:
@@ -495,15 +502,37 @@ export class EpicycleRenderer {
     ctx.stroke(linePath)
   }
 
+  /** Fade bucket (0 = fully shown) for a screen radius, or -1 when it's hidden. */
+  private sizeBucket(r: number, w: number, h: number): number {
+    const f = this.opts.hideAbove
+    if (f === undefined) return 0
+    const limit = f * Math.min(w, h)
+    if (r <= limit) return 0
+    const b = Math.floor(((r - limit) / limit) * SIZE_BUCKETS)
+    return b >= SIZE_BUCKETS ? -1 : b
+  }
+
+  private strokeBuckets(paths: Path2D[], color: string): void {
+    const ctx = this.ctx
+    ctx.strokeStyle = color
+    for (let b = 0; b < paths.length; b++) {
+      ctx.globalAlpha = 1 - b / SIZE_BUCKETS
+      ctx.stroke(paths[b])
+    }
+    ctx.globalAlpha = 1
+  }
+
   private drawCircles(coeffs: Coeffs, view: View, w: number, h: number): void {
     const ctx = this.ctx
     const chain = this.chain
     const amp = coeffs.amp
     const { ox, oy, s } = view
-    ctx.beginPath()
+    const paths = Array.from({ length: SIZE_BUCKETS }, () => new Path2D())
     for (let i = 0; i < this.k; i++) {
       const r = amp[i] * s
       if (r < MIN_RADIUS_PX) break
+      const b = this.sizeBucket(r, w, h)
+      if (b < 0) continue
       const x = ox + chain[2 * i] * s
       const y = oy + chain[2 * i + 1] * s
       if (x + r < 0 || x - r > w || y + r < 0 || y - r > h) continue
@@ -511,12 +540,11 @@ export class EpicycleRenderer {
       const dx = Math.max(x, w - x)
       const dy = Math.max(y, h - y)
       if (dx * dx + dy * dy < r * r) continue
-      ctx.moveTo(x + r, y)
-      ctx.arc(x, y, r, 0, TAU)
+      paths[b].moveTo(x + r, y)
+      paths[b].arc(x, y, r, 0, TAU)
     }
-    ctx.strokeStyle = this.colors.circle
     ctx.lineWidth = this.dpr
-    ctx.stroke()
+    this.strokeBuckets(paths, this.colors.circle)
   }
 
   private drawArrows(coeffs: Coeffs, view: View, tipSx: number, tipSy: number): void {
@@ -524,17 +552,31 @@ export class EpicycleRenderer {
     const chain = this.chain
     const amp = coeffs.amp
     const { ox, oy, s } = view
-    ctx.beginPath()
-    ctx.moveTo(ox + chain[0] * s, oy + chain[1] * s)
+    const w = this.canvas.width
+    const h = this.canvas.height
+    const paths = Array.from({ length: SIZE_BUCKETS }, () => new Path2D())
+    let px = ox + chain[0] * s
+    let py = oy + chain[1] * s
     let i = 0
     for (; i < this.k; i++) {
       if (amp[i] * s < MIN_RADIUS_PX) break
-      ctx.lineTo(ox + chain[2 * i + 2] * s, oy + chain[2 * i + 3] * s)
+      const x = ox + chain[2 * i + 2] * s
+      const y = oy + chain[2 * i + 3] * s
+      const b = this.sizeBucket(amp[i] * s, w, h)
+      if (b >= 0) {
+        paths[b].moveTo(px, py)
+        paths[b].lineTo(x, y)
+      }
+      px = x
+      py = y
     }
     // The skipped sub-pixel arrows still add up; finish the chain at the tip.
-    if (i < this.k) ctx.lineTo(tipSx, tipSy)
-    ctx.strokeStyle = this.colors.arrow
+    if (i < this.k) {
+      paths[0].moveTo(px, py)
+      paths[0].lineTo(tipSx, tipSy)
+    }
     ctx.lineWidth = (this.opts.arrowWidth ?? 1.25) * this.dpr
-    ctx.stroke()
+    this.strokeBuckets(paths, this.colors.arrow)
   }
+
 }

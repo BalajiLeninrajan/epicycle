@@ -111,6 +111,8 @@ function App() {
       camDeadZone: CAM_DEAD_ZONE,
       lineWidth: lineWidthFor(),
       arrowWidth: arrowWidthFor(),
+      // Zoomed in, circles bigger than half the screen fade out, so the view isn't all giant arcs.
+      hideAbove: 0.5,
       playing: false,
     })
     r.setData(coeffs, sampled)
