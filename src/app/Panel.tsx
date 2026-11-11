@@ -408,6 +408,9 @@ function AnimationSection() {
       <ShowChips />
       <Toggle label="Follow the tip" checked={render.followTip.value} onChange={(v) => (render.followTip.value = v)} />
       {render.followTip.value && <ZoomSlider />}
+      {render.followTip.value && render.followZoom.value > 1 && (
+        <span class="cn-meta">Time runs at 1/{Number(render.followZoom.value.toFixed(1))} speed, so the camera keeps up.</span>
+      )}
       <LineWidthSlider />
     </Section>
   )
