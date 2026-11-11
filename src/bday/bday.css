@@ -66,3 +66,15 @@ body { background: var(--fd-bg); overflow: hidden; }
 
 /* Same face as the drawing's text. */
 .bd-ta { font-family: "Baloo Thambi 2", "Noto Sans Tamil", sans-serif; font-weight: 600; font-size: 1.15em; }
+
+/* Blue instead of the design system's mauve: the line, the Play button, the slider. */
+:root {
+  --fd-trail: var(--blue, #89b4fa);
+  --cn-interactive: var(--blue, #89b4fa);
+  --accent: var(--blue, #89b4fa);
+}
+::selection { background: var(--blue, #89b4fa); }
+.fd-range::-webkit-slider-thumb { background: var(--blue); }
+.fd-range::-moz-range-thumb { background: var(--blue); }
+.fd-range:hover:not(:disabled)::-webkit-slider-thumb { background: var(--sapphire); }
+.fd-range:hover:not(:disabled)::-moz-range-thumb { background: var(--sapphire); }
