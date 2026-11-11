@@ -41,6 +41,8 @@ export interface RenderOptions {
    * toward it otherwise, and never moves faster than camMaxSpeed CSS px per second.
    */
   camMaxSpeed?: number
+  /** Extra speed allowed per CSS px the tip is away from the centre, per second, so the camera can catch up. */
+  camCatchUp?: number
   camDeadZone?: number
   /** Arrow line width in CSS px (default 1.25). */
   arrowWidth?: number
@@ -386,7 +388,7 @@ export class EpicycleRenderer {
       const dy = (ty - this.camY) * s
       const dist = Math.hypot(dx, dy)
       const dead = (this.opts.camDeadZone ?? 0) * Math.min(w, h)
-      const max = (this.opts.camMaxSpeed ?? Infinity) * this.dpr
+      const max = (this.opts.camMaxSpeed ?? Infinity) * this.dpr + (this.opts.camCatchUp ?? 0) * dist
       // Wanted screen velocity: close the distance past the dead zone in about a quarter second.
       let vx = 0
       let vy = 0

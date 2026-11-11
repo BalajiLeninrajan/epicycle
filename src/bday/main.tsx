@@ -20,6 +20,8 @@ const SLIDER_STEPS = 1000
 /** Camera cap and dead zone for the smooth follow (CSS px per second, fraction of the short side). */
 const CAM_MAX_SPEED = 700
 const CAM_DEAD_ZONE = 0.12
+/** Per second, per px of lag: far behind (after a fast zoom), the camera speeds up to catch the tip. */
+const CAM_CATCH_UP = 3
 /** Line width in CSS px: thin, and thinner still on phones where the drawing is small. */
 const isSmall = () => Math.min(innerWidth, innerHeight) < 640
 const lineWidthFor = () => (isSmall() ? 0.5 : 1)
@@ -109,6 +111,7 @@ function App() {
       followAmount: 0,
       camMaxSpeed: CAM_MAX_SPEED,
       camDeadZone: CAM_DEAD_ZONE,
+      camCatchUp: CAM_CATCH_UP,
       lineWidth: lineWidthFor(),
       arrowWidth: arrowWidthFor(),
       // Zoomed in, circles bigger than half the screen fade out, so the view isn't all giant arcs.
