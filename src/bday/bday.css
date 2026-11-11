@@ -78,3 +78,4 @@ body { background: var(--fd-bg); overflow: hidden; }
 .fd-range::-moz-range-thumb { background: var(--blue); }
 .fd-range:hover:not(:disabled)::-webkit-slider-thumb { background: var(--sapphire); }
 .fd-range:hover:not(:disabled)::-moz-range-thumb { background: var(--sapphire); }
+.fd-range::-moz-range-progress { background: var(--blue); }
