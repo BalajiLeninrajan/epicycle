@@ -1,24 +1,8 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "epicycle",
-  "main": "./server/index.ts",
+  "name": "appa-bday",
   "compatibility_date": "2026-10-01",
-  "assets": {
-    "directory": "./dist",
-    "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    // Only the share API runs the Worker; everything else is a static asset or the SPA shell.
-    "run_worker_first": ["/api/*"]
-  },
-  // Created by the first deploy (Wrangler provisions a binding with no id); wrangler dev uses a local copy.
-  "kv_namespaces": [{ "binding": "SHARES", "id": "5463377d991a4c52b0f452629e22a19b" }],
-  "workers_dev": true,
-  "ratelimits": [
-    {
-      "name": "SHARE_LIMIT",
-      "namespace_id": "4401",
-      "simple": { "limit": 20, "period": 60 }
-    }
-  ],
-  "observability": { "enabled": true }
+  // Static page only: no share API, no KV.
+  "assets": { "directory": "./dist", "not_found_handling": "single-page-application" },
+  "workers_dev": true
 }

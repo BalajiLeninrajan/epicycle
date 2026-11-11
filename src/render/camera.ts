@@ -27,10 +27,14 @@ export function newCamera(): Camera {
   return { follow: 0, zoom: 1 }
 }
 
-/** Eases cam toward the follow/zoom target. Returns true once settled (and snapped onto the target). */
-export function stepCamera(cam: Camera, following: boolean, followZoom: number, dt: number): boolean {
-  const tf = following ? 1 : 0
-  const tz = following ? Math.max(1e-3, followZoom) : 1
+/**
+ * Eases cam toward the follow/zoom target. Returns true once settled (and snapped onto the target).
+ * A number for following is a partial follow in [0, 1] at followZoom.
+ */
+export function stepCamera(cam: Camera, following: boolean | number, followZoom: number, dt: number): boolean {
+  const partial = typeof following === 'number'
+  const tf = partial ? Math.min(1, Math.max(0, following)) : following ? 1 : 0
+  const tz = partial || following ? Math.max(1e-3, followZoom) : 1
   const k = smoothing(dt, CAMERA_RATE)
   cam.follow += (tf - cam.follow) * k
   const lz = Math.log(cam.zoom)

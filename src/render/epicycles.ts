@@ -31,6 +31,8 @@ export interface RenderOptions {
   followTip: boolean
   /** Zoom factor while following. */
   followZoom: number
+  /** Partial follow in [0, 1] at followZoom; overrides followTip when set. */
+  followAmount?: number
   lineWidth: number
   playing: boolean
 }
@@ -336,7 +338,7 @@ export class EpicycleRenderer {
     evalChain(coeffs, k, this.t, chain)
     const tipX = chain[2 * k]
     const tipY = chain[2 * k + 1]
-    this.camSettled = stepCamera(this.cam, this.opts.followTip, this.opts.followZoom, dt)
+    this.camSettled = stepCamera(this.cam, this.opts.followAmount ?? this.opts.followTip, this.opts.followZoom, dt)
     const view = viewTransform(w, h, this.cam, tipX, tipY, this.view)
     const tipSx = view.ox + tipX * view.s
     const tipSy = view.oy + tipY * view.s
