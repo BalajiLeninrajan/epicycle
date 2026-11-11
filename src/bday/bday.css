@@ -30,3 +30,12 @@ body { background: var(--fd-bg); overflow: hidden; }
   .bd-zoom { left: 16px; right: 16px; bottom: 16px; }
   .bd-zoom .fd-range { flex: 1; width: auto; }
 }
+
+/* Opening card */
+.bd-intro { padding: var(--space-5); width: min(560px, calc(100vw - 32px)); }
+.bd-intro h1 { margin: 0 0 var(--space-3); font-size: 1.6rem; }
+.bd-intro p { margin: 0 0 var(--space-3); line-height: 1.55; }
+.bd-math { display: grid; gap: var(--space-2); margin: var(--space-2) 0 var(--space-4); font-size: 1.15rem; }
+.bd-math math { margin: 0; }
+.bd-intro-actions { display: flex; justify-content: flex-end; margin-top: var(--space-4); }
+.bd-zoom-value + .bd-zoom-value { min-width: 9ch; }

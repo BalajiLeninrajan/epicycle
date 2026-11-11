@@ -17,6 +17,9 @@ const MAX_ZOOM = 80
 /** By this zoom the camera is centred on the tip; below it the view slides there from the drawing's centre. */
 const FOLLOW_FULL_AT = 2.5
 const SLIDER_STEPS = 1000
+/** Camera cap and dead zone for the smooth follow (CSS px per second, fraction of the short side). */
+const CAM_MAX_SPEED = 700
+const CAM_DEAD_ZONE = 0.12
 
 const sampled = resample({ points: Float32Array.from(drawing.points), jump: Uint8Array.from(drawing.jump) }, SAMPLES)
 const coeffs = computeCoeffs(sampled)
@@ -38,7 +41,14 @@ const COEFFICIENT =
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<EpicycleRenderer | null>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
   const [zoom, setZoom] = useState(1)
+  const [started, setStarted] = useState(false)
+
+  useEffect(() => {
+    const d = dialogRef.current
+    if (d && !d.open) d.showModal()
+  }, [])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -54,7 +64,9 @@ function App() {
       followTip: true,
       followZoom: 1,
       followAmount: 0,
-      playing: true,
+      camMaxSpeed: CAM_MAX_SPEED,
+      camDeadZone: CAM_DEAD_ZONE,
+      playing: false,
     })
     r.setData(coeffs, sampled)
     rendererRef.current = r
@@ -62,8 +74,14 @@ function App() {
   }, [])
 
   useEffect(() => {
-    rendererRef.current?.setOptions({ followZoom: zoom, followAmount: followFor(zoom) })
+    // Time slows as you zoom in, so the tip crosses the screen at the same speed at any zoom
+    // and the capped camera can keep it in view.
+    rendererRef.current?.setOptions({ followZoom: zoom, followAmount: followFor(zoom), timeScale: 1 / zoom })
   }, [zoom])
+
+  useEffect(() => {
+    if (started) rendererRef.current?.setOptions({ playing: true })
+  }, [started])
 
   // Wheel and pinch zoom on the canvas.
   useEffect(() => {
@@ -118,6 +136,23 @@ function App() {
         <div dangerouslySetInnerHTML={{ __html: COEFFICIENT }} />
         <span class="cn-meta">{CIRCLES} circles, largest |c<sub>n</sub>| first</span>
       </div>
+      <dialog ref={dialogRef} class="modal bd-intro" onClose={() => setStarted(true)} aria-labelledby="bd-title">
+        <h1 id="bd-title">Happy Birthday, அப்பா</h1>
+        <p>
+          This is a complex Fourier series. {CIRCLES} circles, each spinning at its own speed, add up to a single line, and
+          that line draws the two of us.
+        </p>
+        <div class="bd-math">
+          <div dangerouslySetInnerHTML={{ __html: SERIES }} />
+          <div dangerouslySetInnerHTML={{ __html: COEFFICIENT }} />
+        </div>
+        <p>I can only understand math like this because of the education you worked so hard to give me. Thank you, அப்பா.</p>
+        <form method="dialog" class="bd-intro-actions">
+          <button type="submit" class="btn btn-primary" autofocus>
+            Watch it draw
+          </button>
+        </form>
+      </dialog>
       <label class="bd-zoom cn-r-card">
         <span class="cn-meta">Zoom</span>
         <input
@@ -131,6 +166,7 @@ function App() {
           onInput={(e) => setZoom(clampZoom(MAX_ZOOM ** (Number(e.currentTarget.value) / SLIDER_STEPS)))}
         />
         <span class="cn-meta bd-zoom-value">{zoom < 9.95 ? zoom.toFixed(1) : Math.round(zoom)}×</span>
+        {zoom >= 1.05 && <span class="cn-meta bd-zoom-value">{zoom < 9.95 ? (1 / zoom).toFixed(2) : `1/${Math.round(zoom)}`} speed</span>}
       </label>
     </main>
   )

@@ -1,6 +1,6 @@
 import { evalChain, reconstruct } from '../fourier/epicycles'
 import type { Coeffs, SampledPath } from '../pipeline/types'
-import { newCamera, stepCamera, viewTransform, type View } from './camera'
+import { fitScale, newCamera, smoothing, stepCamera, viewTransform, type View } from './camera'
 import { mixRgb, parseRgb, readThemeColors, type ThemeColors } from './theme'
 import {
   FADE_BUCKETS,
@@ -33,6 +33,15 @@ export interface RenderOptions {
   followZoom: number
   /** Partial follow in [0, 1] at followZoom; overrides followTip when set. */
   followAmount?: number
+  /** Playback speed multiplier (1 = durationSec per loop). */
+  timeScale?: number
+  /**
+   * Smooth follow: the camera drifts after the tip instead of locking onto it. It stays put
+   * while the tip is within camDeadZone (fraction of the short side) of the centre, eases
+   * toward it otherwise, and never moves faster than camMaxSpeed CSS px per second.
+   */
+  camMaxSpeed?: number
+  camDeadZone?: number
   lineWidth: number
   playing: boolean
 }
@@ -94,6 +103,11 @@ export class EpicycleRenderer {
   private dprQuery: MediaQueryList | null = null
   private readonly cam = newCamera()
   private readonly view: View = { ox: 0, oy: 0, s: 1 }
+  /** Smooth-follow camera centre (world units) and velocity (world units per second). */
+  private camX = 0
+  private camY = 0
+  private camVX = 0
+  private camVY = 0
   private readonly clip: TraceClip = { width: 0, height: 0, margin: 0 }
   /**
    * In Full mode, once the first loop is done and the camera is at rest, the drawing stops
@@ -226,7 +240,7 @@ export class EpicycleRenderer {
     this.lastTs = ts
     const active = this.coeffs !== null
     if (active && this.opts.playing) {
-      this.t += dt / this.opts.durationSec
+      this.t += (dt * (this.opts.timeScale ?? 1)) / this.opts.durationSec
       if (this.t >= 1) {
         if (this.onceDone !== null) {
           this.t = 1
@@ -339,7 +353,7 @@ export class EpicycleRenderer {
     const tipX = chain[2 * k]
     const tipY = chain[2 * k + 1]
     this.camSettled = stepCamera(this.cam, this.opts.followAmount ?? this.opts.followTip, this.opts.followZoom, dt)
-    const view = viewTransform(w, h, this.cam, tipX, tipY, this.view)
+    const view = this.opts.camMaxSpeed === undefined ? viewTransform(w, h, this.cam, tipX, tipY, this.view) : this.smoothView(w, h, tipX, tipY, dt)
     const tipSx = view.ox + tipX * view.s
     const tipSy = view.oy + tipY * view.s
 
@@ -351,6 +365,44 @@ export class EpicycleRenderer {
     ctx.lineJoin = 'round'
     if (this.opts.showCircles) this.drawCircles(coeffs, view, w, h)
     if (this.opts.showArrows) this.drawArrows(coeffs, view, tipSx, tipSy)
+  }
+
+  /** View for smooth follow: the centre chases follow * tip with a dead zone, eased acceleration and a speed cap. */
+  private smoothView(w: number, h: number, tipX: number, tipY: number, dt: number): View {
+    const s = fitScale(w, h) * this.cam.zoom
+    const tx = this.cam.follow * tipX
+    const ty = this.cam.follow * tipY
+    if (s > 0 && dt > 0) {
+      const dx = (tx - this.camX) * s
+      const dy = (ty - this.camY) * s
+      const dist = Math.hypot(dx, dy)
+      const dead = (this.opts.camDeadZone ?? 0) * Math.min(w, h)
+      const max = (this.opts.camMaxSpeed ?? Infinity) * this.dpr
+      // Wanted screen velocity: close the distance past the dead zone in about a quarter second.
+      let vx = 0
+      let vy = 0
+      if (dist > dead) {
+        const want = Math.min(max, (dist - dead) * 4)
+        vx = (dx / dist) * want
+        vy = (dy / dist) * want
+      }
+      const a = smoothing(dt, 6)
+      let cvx = this.camVX * s + (vx - this.camVX * s) * a
+      let cvy = this.camVY * s + (vy - this.camVY * s) * a
+      const sp = Math.hypot(cvx, cvy)
+      if (sp > max) {
+        cvx *= max / sp
+        cvy *= max / sp
+      }
+      this.camVX = cvx / s
+      this.camVY = cvy / s
+      this.camX += this.camVX * dt
+      this.camY += this.camVY * dt
+    }
+    this.view.s = s
+    this.view.ox = w / 2 - this.camX * s
+    this.view.oy = h / 2 - this.camY * s
+    return this.view
   }
 
   private drawTrail(view: View, tipSx: number, tipSy: number): void {
